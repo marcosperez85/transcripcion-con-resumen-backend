@@ -80,7 +80,19 @@ class TranscripcionConResumenBackendStack(Stack):
         api = apigateway.RestApi(self, "TranscripcionAPI")
 
         # Crear integración con respuestas CORS personalizadas
-        transcribir_integration = apigateway.LambdaIntegration(lambda_transcribir)
+        transcribir_integration = apigateway.LambdaIntegration(
+            lambda_transcribir,
+            integration_responses=[
+                apigateway.IntegrationResponse(
+                    status_code="200",
+                    response_parameters={
+                        "method.response.header.Access-Control-Allow-Origin": "'*'",
+                        "method.response.header.Access-Control-Allow-Headers": "'Content-Type'",
+                        "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,POST'"
+                    }
+                )
+            ]
+        )
 
         # Crear recurso /transcribir
         transcribir_resource = api.root.add_resource("transcribir")
