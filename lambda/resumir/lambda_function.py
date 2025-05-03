@@ -10,8 +10,6 @@ logger.setLevel(logging.INFO)
 
 # Nombre del bucket de entrada y salida
 inputBucketName = "transcripcion-con-resumen"
-# outputBucketName = "transcripcion-con-resumen"
-
 output_bucket = os.environ['BUCKET']
 
 # Crear clientes de AWS
@@ -65,12 +63,12 @@ def lambda_handler(event, context):
 
         # Subir el resumen a S3
         s3.put_object(
-            Bucket=outputBucketName,
+            Bucket=output_bucket,
             Key=output_key,
             Body=summary
         )
 
-        logger.info(f"Resumen guardado en: s3://{outputBucketName}/{output_key}")
+        logger.info(f"Resumen guardado en: s3://{output_bucket}/{output_key}")
 
         return {
             'statusCode': 200,

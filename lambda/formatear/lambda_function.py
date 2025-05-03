@@ -7,8 +7,6 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 s3_client = boto3.client('s3')
-
-# output_bucket = "transcripcion-con-resumen"
 output_bucket = os.environ['BUCKET']
 
 def lambda_handler(event, context):

@@ -8,9 +8,6 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 transcribe_client = boto3.client('transcribe')
-
-# output_bucket = "transcripcion-con-resumen"
-
 output_bucket = os.environ['BUCKET']
 
 def lambda_handler(event, context):
