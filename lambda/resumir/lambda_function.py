@@ -2,6 +2,7 @@ import json
 import boto3
 import os
 import logging
+import os
 
 # Configuración del logger para CloudWatch
 logger = logging.getLogger()
@@ -9,7 +10,9 @@ logger.setLevel(logging.INFO)
 
 # Nombre del bucket de entrada y salida
 inputBucketName = "transcripcion-con-resumen"
-outputBucketName = "transcripcion-con-resumen"
+# outputBucketName = "transcripcion-con-resumen"
+
+output_bucket = os.environ['BUCKET']
 
 # Crear clientes de AWS
 bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
