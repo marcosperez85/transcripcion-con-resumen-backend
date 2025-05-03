@@ -1,5 +1,5 @@
 from aws_cdk import (
-    # Duration,
+    Duration,
     Stack,
     aws_lambda as lambda_,
     aws_s3 as s3,
@@ -25,37 +25,37 @@ class TranscripcionConResumenBackendStack(Stack):
         bucket_general = s3.Bucket.from_bucket_name(self, "BucketGeneral", "transcripcion-con-resumen")
 
         # Lambda de transcripción
-        lambda_transcribir = lambda_.Function(self, "LambdaTranscribir",
+        lambda_transcribir = lambda_.Function(self, "proyecto1-transcribir-audios",
+            function_name = "proyecto1-transcribir-audios",
             runtime = lambda_.Runtime.PYTHON_3_12,
             handler = "lambda_function.handler",
             code = lambda_.Code.from_asset("lambda/transcribir"),
             environment = {
                 "BUCKET": bucket_general.bucket_name,
-                "PREFIX_DESTINO": "transcripciones/"
             },
             timeout = Duration.minutes(5),
             memory_size = 512
         )
 
-        lambda_formatear = lambda_.Function(self, "LambdaFormatear",
+        lambda_formatear = lambda_.Function(self, "proyecto1-formatear-transcripcion",
+            function_name = "proyecto1-formatear-transcripcion",
             runtime = lambda_.Runtime.PYTHON_3_12,
             handler = "lambda_function.handler",
             code = lambda_.Code.from_asset("lambda/formatear"),
             environment = {
-                "BUCKET": bucket_general.bucket_name,
-                "PREFIX_DESTINO": "transcripciones/"                
+                "BUCKET": bucket_general.bucket_name,               
             },
             timeout = Duration.minutes(5),
             memory_size = 512
         )
 
-        lambda_resumir = lambda_.Function(self, "LambdaResumir",
+        lambda_resumir = lambda_.Function(self, "proyecto1-resumir-transcripciones",
+            function_name = "proyecto1-resumir-transcripciones",
             runtime = lambda_.Runtime.PYTHON_3_12,
             handler = "lambda_function.handler",
             code = lambda_.Code.from_asset("lambda/formatear"),
             environment = {
                 "BUCKET": bucket_general.bucket_name,
-                "PREFIX_DESTINO" : "resumenes/"
             },
             timeout = Duration.minutes(5),
             memory_size = 512
