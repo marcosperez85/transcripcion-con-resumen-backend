@@ -30,7 +30,7 @@ class TranscripcionConResumenBackendStack(Stack):
         lambda_transcribir = lambda_.Function(self, "proyecto1-transcribir-audios",
             function_name = "proyecto1-transcribir-audios",
             runtime = lambda_.Runtime.PYTHON_3_12,
-            handler = "lambda_function.handler",
+            handler = "lambda_function.lambda_handler",
             code = lambda_.Code.from_asset("lambda/transcribir"),
             environment = {
                 "BUCKET": bucket_general.bucket_name,
@@ -42,7 +42,7 @@ class TranscripcionConResumenBackendStack(Stack):
         lambda_formatear = lambda_.Function(self, "proyecto1-formatear-transcripcion",
             function_name = "proyecto1-formatear-transcripcion",
             runtime = lambda_.Runtime.PYTHON_3_12,
-            handler = "lambda_function.handler",
+            handler = "lambda_function.lambda_handler",
             code = lambda_.Code.from_asset("lambda/formatear"),
             environment = {
                 "BUCKET": bucket_general.bucket_name,               
@@ -54,8 +54,8 @@ class TranscripcionConResumenBackendStack(Stack):
         lambda_resumir = lambda_.Function(self, "proyecto1-resumir-transcripciones",
             function_name = "proyecto1-resumir-transcripciones",
             runtime = lambda_.Runtime.PYTHON_3_12,
-            handler = "lambda_function.handler",
-            code = lambda_.Code.from_asset("lambda/formatear"),
+            handler = "lambda_function.lambda_handler",
+            code = lambda_.Code.from_asset("lambda/resumir"),
             environment = {
                 "BUCKET": bucket_general.bucket_name,
             },
@@ -64,8 +64,63 @@ class TranscripcionConResumenBackendStack(Stack):
         )
 
         api = apigateway.RestApi(self, "TranscripcionAPI")
+
+        # Crear integración con respuestas CORS personalizadas
         transcribir_integration = apigateway.LambdaIntegration(lambda_transcribir)
-        api.root.add_resource("transcribir").add_method("POST", transcribir_integration)
+
+        # Crear recurso /transcribir
+        transcribir_resource = api.root.add_resource("transcribir")
+
+        # Método POST
+        transcribir_resource.add_method(
+            "POST",
+            transcribir_integration,
+            method_responses=[
+                {
+                    "statusCode": "200",
+                    "responseParameters": {
+                        "method.response.header.Access-Control-Allow-Origin": True,
+                        "method.response.header.Access-Control-Allow-Headers": True,
+                        "method.response.header.Access-Control-Allow-Methods": True,
+                    },
+                }
+            ]
+        )
+
+        # Método OPTIONS (preflight CORS)
+        transcribir_resource.add_method(
+            "OPTIONS",
+            apigateway.MockIntegration(
+                integration_responses=[
+                    {
+                        "statusCode": "200",
+                        "responseParameters": {
+                            "method.response.header.Access-Control-Allow-Headers": "'Content-Type'",
+                            "method.response.header.Access-Control-Allow-Origin": "'*'",
+                            "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,POST'",
+                        },
+                        "responseTemplates": {
+                            "application/json": "{}"
+                        },
+                    }
+                ],
+                passthrough_behavior=apigateway.PassthroughBehavior.NEVER,
+                request_templates={
+                    "application/json": '{"statusCode": 200}'
+                },
+            ),
+            method_responses=[
+                {
+                    "statusCode": "200",
+                    "responseParameters": {
+                        "method.response.header.Access-Control-Allow-Headers": True,
+                        "method.response.header.Access-Control-Allow-Origin": True,
+                        "method.response.header.Access-Control-Allow-Methods": True,
+                    },
+                }
+            ]
+        )
+
 
         bucket_general.add_event_notification(
             s3.EventType.OBJECT_CREATED,
