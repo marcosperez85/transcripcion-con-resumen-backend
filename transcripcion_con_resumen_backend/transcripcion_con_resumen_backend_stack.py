@@ -5,6 +5,7 @@ from aws_cdk import (
     aws_s3 as s3,
     aws_iam as iam,
     aws_apigateway as apigateway,
+    aws_s3_notifications as s3n,
 )
 
 from constructs import Construct
@@ -65,6 +66,18 @@ class TranscripcionConResumenBackendStack(Stack):
         api = apigateway.RestApi(self, "TranscripcionAPI")
         transcribir_integration = apigateway.LambdaIntegration(lambda_transcribir)
         api.root.add_resource("transcribir").add_method("POST", transcribir_integration)
+
+        bucket_general.add_event_notification(
+            s3.EventType.OBJECT_CREATED,
+            s3n.LambdaDestination(lambda_formatear),
+            s3.NotificationKeyFilter(prefix="transcripciones/", suffix=".json")
+        )
+                
+        bucket_general.add_event_notification(
+            s3.EventType.OBJECT_CREATED,
+            s3n.LambdaDestination(lambda_resumir),
+            s3.NotificationKeyFilter(prefix="transcripciones/", suffix=".txt")
+        ) 
 
         # Permisos para leer y escribir en el bucket
         bucket_general.grant_read_write(lambda_transcribir)
