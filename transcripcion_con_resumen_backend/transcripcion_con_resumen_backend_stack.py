@@ -39,6 +39,13 @@ class TranscripcionConResumenBackendStack(Stack):
             memory_size = 512
         )
 
+        lambda_transcribir.add_to_role_policy(
+            iam.PolicyStatement(
+            actions=["transcribe:StartTranscriptionJob"],
+            resources=["*"]
+            )
+        )
+
         lambda_formatear = lambda_.Function(self, "proyecto1-formatear-transcripcion",
             function_name = "proyecto1-formatear-transcripcion",
             runtime = lambda_.Runtime.PYTHON_3_12,
