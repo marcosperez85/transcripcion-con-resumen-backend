@@ -2,13 +2,16 @@ import boto3
 import uuid
 import logging
 import json
+import os
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 transcribe_client = boto3.client('transcribe')
 
-output_bucket = "transcripcion-con-resumen"
+# output_bucket = "transcripcion-con-resumen"
+
+output_bucket = os.environ['BUCKET']
 
 def lambda_handler(event, context):
     # Verifica que el evento contiene los datos correctamente
