@@ -48,7 +48,8 @@ def lambda_handler(event, context):
                 output_text += item['alternatives'][0]['content'] + " "
 
         # Guardar archivo .txt
-        txt_key = key.replace(".json", ".txt")
+        filename = os.path.basename(key).replace(".json", ".txt")
+        txt_key = f"transcripciones-formateadas/{filename}"
         s3_client.put_object(
             Bucket=bucket,
             Key=txt_key,
