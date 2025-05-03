@@ -4,8 +4,9 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_s3 as s3,
     aws_iam as iam,
-    # aws_sqs as sqs,
+    aws_apigateway as apigateway,
 )
+
 from constructs import Construct
 
 class TranscripcionConResumenBackendStack(Stack):
@@ -60,6 +61,10 @@ class TranscripcionConResumenBackendStack(Stack):
             timeout = Duration.minutes(5),
             memory_size = 512
         )
+
+        api = apigateway.RestApi(self, "TranscripcionAPI")
+        transcribir_integration = apigateway.LambdaIntegration(lambda_transcribir)
+        api.root.add_resource("transcribir").add_method("POST", transcribir_integration)
 
         # Permisos para leer y escribir en el bucket
         bucket_general.grant_read_write(lambda_transcribir)
