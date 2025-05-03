@@ -76,7 +76,7 @@ class TranscripcionConResumenBackendStack(Stack):
         bucket_general.add_event_notification(
             s3.EventType.OBJECT_CREATED,
             s3n.LambdaDestination(lambda_resumir),
-            s3.NotificationKeyFilter(prefix="transcripciones/", suffix=".txt")
+            s3.NotificationKeyFilter(prefix="transcripciones-formateadas/", suffix=".txt")
         ) 
 
         # Permisos para leer y escribir en el bucket
