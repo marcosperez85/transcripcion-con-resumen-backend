@@ -15,7 +15,19 @@ def lambda_handler(event, context):
     logger.info(f"Received event: {json.dumps(event)}")
 
     # Deserializar el contenido de 'body'
-    body = json.loads(event['body'])
+    # body = json.loads(event['body'])
+
+    # Probando esta sugerencia
+    if 'body' in event:
+        try:
+            body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']
+        except Exception as e:
+            logger.error(f"Error al parsear 'body': {str(e)}")
+            raise
+    else:
+        body = event
+
+
 
     logger.info(f"El body del mensaje contiene: {body}")
     
