@@ -70,6 +70,13 @@ class TranscripcionConResumenBackendStack(Stack):
             memory_size = 512
         )
 
+        lambda_resumir.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:InvokeModel"],
+                resources=["*"]  # restringir al ARN específico del modelo a futuro
+            )
+        )
+
         api = apigateway.RestApi(self, "TranscripcionAPI")
 
         # Crear integración con respuestas CORS personalizadas
