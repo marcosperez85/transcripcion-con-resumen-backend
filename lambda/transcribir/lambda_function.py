@@ -14,10 +14,6 @@ def lambda_handler(event, context):
     # Verifica que el evento contiene los datos correctamente
     logger.info(f"Received event: {json.dumps(event)}")
 
-    # Deserializar el contenido de 'body'
-    # body = json.loads(event['body'])
-
-    # Probando esta sugerencia
     if 'body' in event:
         try:
             body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']
