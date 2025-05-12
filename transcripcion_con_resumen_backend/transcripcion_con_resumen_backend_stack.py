@@ -77,7 +77,7 @@ class TranscripcionConResumenBackendStack(Stack):
             )
         )
 
-        api = apigateway.RestApi(self, "TranscripcionAPI")
+        api_transcribe = apigateway.RestApi(self, "TranscripcionAPI")
 
         # Crear integración con respuestas CORS personalizadas
         transcribir_integration = apigateway.LambdaIntegration(
@@ -95,7 +95,7 @@ class TranscripcionConResumenBackendStack(Stack):
         )
 
         # Crear recurso /transcribir
-        transcribir_resource = api.root.add_resource("transcribir")
+        transcribir_resource = api_transcribe.root.add_resource("transcribir")
 
         # Método POST
         transcribir_resource.add_method(
@@ -115,6 +115,77 @@ class TranscripcionConResumenBackendStack(Stack):
 
         # Método OPTIONS (preflight CORS)
         transcribir_resource.add_method(
+            "OPTIONS",
+            apigateway.MockIntegration(
+                integration_responses=[
+                    {
+                        "statusCode": "200",
+                        "responseParameters": {
+                            "method.response.header.Access-Control-Allow-Headers": "'Content-Type'",
+                            "method.response.header.Access-Control-Allow-Origin": "'*'",
+                            "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,POST'",
+                        },
+                        "responseTemplates": {
+                            "application/json": "{}"
+                        },
+                    }
+                ],
+                passthrough_behavior=apigateway.PassthroughBehavior.NEVER,
+                request_templates={
+                    "application/json": '{"statusCode": 200}'
+                },
+            ),
+            method_responses=[
+                {
+                    "statusCode": "200",
+                    "responseParameters": {
+                        "method.response.header.Access-Control-Allow-Headers": True,
+                        "method.response.header.Access-Control-Allow-Origin": True,
+                        "method.response.header.Access-Control-Allow-Methods": True,
+                    },
+                }
+            ]
+        )
+
+# ==================================================================================================
+        api_formatear = apigateway.RestApi(self, "FormatearAPI")
+
+        # Crear recurso /formatear
+        formatear_resource = api_formatear.root.add_resource("formatear")
+
+        # Crear integración con respuestas CORS personalizadas
+        formatear_integration = apigateway.LambdaIntegration(
+            lambda_formatear,
+            integration_responses=[
+                apigateway.IntegrationResponse(
+                    status_code="200",
+                    response_parameters={
+                        "method.response.header.Access-Control-Allow-Origin": "'*'",
+                        "method.response.header.Access-Control-Allow-Headers": "'Content-Type'",
+                        "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,POST'"
+                    }
+                )
+            ]
+        )
+
+        # Método POST
+        formatear_resource.add_method(
+            "POST",
+            formatear_integration,
+            method_responses=[
+                {
+                    "statusCode": "200",
+                    "responseParameters": {
+                        "method.response.header.Access-Control-Allow-Origin": True,
+                        "method.response.header.Access-Control-Allow-Headers": True,
+                        "method.response.header.Access-Control-Allow-Methods": True,
+                    },
+                }
+            ]
+        )
+
+        # Método OPTIONS (preflight CORS)
+        formatear_resource.add_method(
             "OPTIONS",
             apigateway.MockIntegration(
                 integration_responses=[
