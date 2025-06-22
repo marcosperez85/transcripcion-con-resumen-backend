@@ -46,6 +46,7 @@ class TranscripcionConResumenBackendStack(Stack):
             )
         )
 
+        # Lambda para formatear la transcripción
         lambda_formatear = lambda_.Function(self, "proyecto1-formatear-transcripcion",
             function_name = "proyecto1-formatear-transcripcion",
             runtime = lambda_.Runtime.PYTHON_3_12,
@@ -57,7 +58,8 @@ class TranscripcionConResumenBackendStack(Stack):
             timeout = Duration.minutes(5),
             memory_size = 512
         )
-
+        
+        # Lambda de para resumir la transcripción
         lambda_resumir = lambda_.Function(self, "proyecto1-resumir-transcripciones",
             function_name = "proyecto1-resumir-transcripciones",
             runtime = lambda_.Runtime.PYTHON_3_12,
@@ -123,7 +125,7 @@ class TranscripcionConResumenBackendStack(Stack):
                         "responseParameters": {
                             "method.response.header.Access-Control-Allow-Headers": "'Content-Type'",
                             "method.response.header.Access-Control-Allow-Origin": "'*'",
-                            "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,POST'",
+                            "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,POST,PUT'",
                         },
                         "responseTemplates": {
                             "application/json": "{}"
