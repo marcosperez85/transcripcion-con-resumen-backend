@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 import os
-
 import aws_cdk as cdk
 
 from transcripcion_con_resumen_backend.transcripcion_con_resumen_backend_stack import TranscripcionConResumenBackendStack
 
+# Definir constantes para variables de entorno
+CDK_DEFAULT_ACCOUNT = os.getenv('CDK_DEFAULT_ACCOUNT')
+CDK_DEFAULT_REGION = os.getenv('CDK_DEFAULT_REGION')
 
 app = cdk.App()
-TranscripcionConResumenBackendStack(app, "TranscripcionConResumenBackendStack",
+
+# Definición del nombre del stack
+stack_name = 'TranscripcionConResumenBackendStack'
+
+TranscripcionConResumenBackendStack(app, stack_name,
     # If you don't specify 'env', this stack will be environment-agnostic.
     # Account/Region-dependent features and context lookups will not work,
     # but a single synthesized template can be deployed anywhere.
@@ -15,7 +21,7 @@ TranscripcionConResumenBackendStack(app, "TranscripcionConResumenBackendStack",
     # Uncomment the next line to specialize this stack for the AWS Account
     # and Region that are implied by the current CLI configuration.
 
-    env=cdk.Environment(account=os.getenv('CDK_DEFAULT_ACCOUNT'), region=os.getenv('CDK_DEFAULT_REGION')),
+    env=cdk.Environment(account=CDK_DEFAULT_ACCOUNT,region=CDK_DEFAULT_REGION),
 
     # Uncomment the next line if you know exactly what Account and Region you
     # want to deploy the stack to. */
