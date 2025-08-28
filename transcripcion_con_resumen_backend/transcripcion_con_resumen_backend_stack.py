@@ -7,231 +7,101 @@ from aws_cdk import (
     aws_apigateway as apigateway,
     aws_s3_notifications as s3n,
 )
-
 from constructs import Construct
 
 class TranscripcionConResumenBackendStack(Stack):
-
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # The code that defines your stack goes here
+        # 1) Bucket único (usa prefijos)
+        bucket_name = "transcripcion-con-resumen"
+        self.bucket = s3.Bucket.from_bucket_name(self, "BucketGeneral", bucket_name)
 
-        # example resource
-        # queue = sqs.Queue(
-        #     self, "TranscripcionConResumenBackendQueue",
-        #     visibility_timeout=Duration.seconds(300),
-        # )
+        # Prefijos (solo constantes para usar en filtros/keys)
+        self.PFX_AUDIOS = "audios/"
+        self.PFX_TRANSCRIPCIONES = "transcripciones/"
+        self.PFX_TRANSCRIPCIONES_FMT = "transcripciones-formateadas/"
+        self.PFX_RESUMENES = "resumenes/"
+        self.PFX_STATIC = "static/"
 
-        # Buckets existentes (o creación de nuevos bucket)
-        bucket_general = s3.Bucket.from_bucket_name(self, "BucketGeneral", "transcripcion-con-resumen")
+        # 2) Lambdas (guardar referencias)
+        common_env = {"BUCKET": self.bucket.bucket_name}
 
-        # Lambda de transcripción
-        lambda_transcribir = lambda_.Function(self, "proyecto1-transcribir-audios",
-            function_name = "proyecto1-transcribir-audios",
-            runtime = lambda_.Runtime.PYTHON_3_12,
-            handler = "lambda_function.lambda_handler",
-            code = lambda_.Code.from_asset("lambda/transcribir"),
-            environment = {
-                "BUCKET": bucket_general.bucket_name,
-            },
-            timeout = Duration.minutes(5),
-            memory_size = 512
+        self.fn_transcribir = lambda_.Function(
+            self, "proyecto1-transcribir-audios",
+            function_name="proyecto1-transcribir-audios",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="lambda_function.lambda_handler",
+            code=lambda_.Code.from_asset("lambda/transcribir"),
+            environment=common_env,
+            timeout=Duration.minutes(5),
+            memory_size=512,
         )
 
-        lambda_transcribir.add_to_role_policy(
+        self.fn_formatear = lambda_.Function(
+            self, "proyecto1-formatear-transcripcion",
+            function_name="proyecto1-formatear-transcripcion",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="lambda_function.lambda_handler",
+            code=lambda_.Code.from_asset("lambda/formatear"),
+            environment=common_env,
+            timeout=Duration.minutes(5),
+            memory_size=512,
+        )
+
+        self.fn_resumir = lambda_.Function(
+            self, "proyecto1-resumir-transcripciones",
+            function_name="proyecto1-resumir-transcripciones",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="lambda_function.lambda_handler",
+            code=lambda_.Code.from_asset("lambda/resumir"),
+            environment=common_env,
+            timeout=Duration.minutes(5),
+            memory_size=512,
+        )
+
+        # 3) Permisos de bucket
+        for fn in [self.fn_transcribir, self.fn_formatear, self.fn_resumir]:
+            self.bucket.grant_read_write(fn)
+
+        # 4) Permisos específicos de servicio
+        # Transcribe para la Lambda de transcribir
+        self.fn_transcribir.add_to_role_policy(
             iam.PolicyStatement(
-            actions=["transcribe:StartTranscriptionJob"],
-            resources=["*"]
+                actions=["transcribe:StartTranscriptionJob", "transcribe:GetTranscriptionJob", "transcribe:ListTranscriptionJobs"],
+                resources=["*"]  # idealmente restringir por ARN si usás Transcribe con recursos nombrados
             )
         )
 
-        lambda_formatear = lambda_.Function(self, "proyecto1-formatear-transcripcion",
-            function_name = "proyecto1-formatear-transcripcion",
-            runtime = lambda_.Runtime.PYTHON_3_12,
-            handler = "lambda_function.lambda_handler",
-            code = lambda_.Code.from_asset("lambda/formatear"),
-            environment = {
-                "BUCKET": bucket_general.bucket_name,               
-            },
-            timeout = Duration.minutes(5),
-            memory_size = 512
-        )
-
-        lambda_resumir = lambda_.Function(self, "proyecto1-resumir-transcripciones",
-            function_name = "proyecto1-resumir-transcripciones",
-            runtime = lambda_.Runtime.PYTHON_3_12,
-            handler = "lambda_function.lambda_handler",
-            code = lambda_.Code.from_asset("lambda/resumir"),
-            environment = {
-                "BUCKET": bucket_general.bucket_name,
-            },
-            timeout = Duration.minutes(5),
-            memory_size = 512
-        )
-
-        lambda_resumir.add_to_role_policy(
+        # Bedrock para la Lambda de resumir (restringí al ARN del modelo cuando lo tengas fijo)
+        self.fn_resumir.add_to_role_policy(
             iam.PolicyStatement(
-                actions=["bedrock:InvokeModel"],
-                resources=["*"]  # restringir al ARN específico del modelo a futuro
+                actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+                resources=["*"]
             )
         )
 
-        api_transcribe = apigateway.RestApi(self, "TranscripcionAPI")
-
-        # Crear integración con respuestas CORS personalizadas
-        transcribir_integration = apigateway.LambdaIntegration(
-            lambda_transcribir,
-            integration_responses=[
-                apigateway.IntegrationResponse(
-                    status_code="200",
-                    response_parameters={
-                        "method.response.header.Access-Control-Allow-Origin": "'*'",
-                        "method.response.header.Access-Control-Allow-Headers": "'Content-Type'",
-                        "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,POST'"
-                    }
-                )
-            ]
-        )
-
-        # Crear recurso /transcribir
-        transcribir_resource = api_transcribe.root.add_resource("transcribir")
-
-        # Método POST
-        transcribir_resource.add_method(
-            "POST",
-            transcribir_integration,
-            method_responses=[
-                {
-                    "statusCode": "200",
-                    "responseParameters": {
-                        "method.response.header.Access-Control-Allow-Origin": True,
-                        "method.response.header.Access-Control-Allow-Headers": True,
-                        "method.response.header.Access-Control-Allow-Methods": True,
-                    },
-                }
-            ]
-        )
-
-        # Método OPTIONS (preflight CORS)
-        transcribir_resource.add_method(
-            "OPTIONS",
-            apigateway.MockIntegration(
-                integration_responses=[
-                    {
-                        "statusCode": "200",
-                        "responseParameters": {
-                            "method.response.header.Access-Control-Allow-Headers": "'Content-Type'",
-                            "method.response.header.Access-Control-Allow-Origin": "'*'",
-                            "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,POST'",
-                        },
-                        "responseTemplates": {
-                            "application/json": "{}"
-                        },
-                    }
-                ],
-                passthrough_behavior=apigateway.PassthroughBehavior.NEVER,
-                request_templates={
-                    "application/json": '{"statusCode": 200}'
-                },
-            ),
-            method_responses=[
-                {
-                    "statusCode": "200",
-                    "responseParameters": {
-                        "method.response.header.Access-Control-Allow-Headers": True,
-                        "method.response.header.Access-Control-Allow-Origin": True,
-                        "method.response.header.Access-Control-Allow-Methods": True,
-                    },
-                }
-            ]
-        )
-
-# ==================================================================================================
-        api_formatear = apigateway.RestApi(self, "FormatearAPI")
-
-        # Crear recurso /formatear
-        formatear_resource = api_formatear.root.add_resource("formatear")
-
-        # Crear integración con respuestas CORS personalizadas
-        formatear_integration = apigateway.LambdaIntegration(
-            lambda_formatear,
-            integration_responses=[
-                apigateway.IntegrationResponse(
-                    status_code="200",
-                    response_parameters={
-                        "method.response.header.Access-Control-Allow-Origin": "'*'",
-                        "method.response.header.Access-Control-Allow-Headers": "'Content-Type'",
-                        "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,POST'"
-                    }
-                )
-            ]
-        )
-
-        # Método POST
-        formatear_resource.add_method(
-            "POST",
-            formatear_integration,
-            method_responses=[
-                {
-                    "statusCode": "200",
-                    "responseParameters": {
-                        "method.response.header.Access-Control-Allow-Origin": True,
-                        "method.response.header.Access-Control-Allow-Headers": True,
-                        "method.response.header.Access-Control-Allow-Methods": True,
-                    },
-                }
-            ]
-        )
-
-        # Método OPTIONS (preflight CORS)
-        formatear_resource.add_method(
-            "OPTIONS",
-            apigateway.MockIntegration(
-                integration_responses=[
-                    {
-                        "statusCode": "200",
-                        "responseParameters": {
-                            "method.response.header.Access-Control-Allow-Headers": "'Content-Type'",
-                            "method.response.header.Access-Control-Allow-Origin": "'*'",
-                            "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,POST'",
-                        },
-                        "responseTemplates": {
-                            "application/json": "{}"
-                        },
-                    }
-                ],
-                passthrough_behavior=apigateway.PassthroughBehavior.NEVER,
-                request_templates={
-                    "application/json": '{"statusCode": 200}'
-                },
-            ),
-            method_responses=[
-                {
-                    "statusCode": "200",
-                    "responseParameters": {
-                        "method.response.header.Access-Control-Allow-Headers": True,
-                        "method.response.header.Access-Control-Allow-Origin": True,
-                        "method.response.header.Access-Control-Allow-Methods": True,
-                    },
-                }
-            ]
-        )
-
-
-        bucket_general.add_event_notification(
+        # 5) Notificaciones S3 → Lambdas (prefijos correctos)
+        # Cuando aparece un .json en transcripciones/ => formatear
+        self.bucket.add_event_notification(
             s3.EventType.OBJECT_CREATED,
-            s3n.LambdaDestination(lambda_formatear),
-            s3.NotificationKeyFilter(prefix="transcripciones/", suffix=".json")
+            s3n.LambdaDestination(self.fn_formatear),
+            s3.NotificationKeyFilter(prefix=self.PFX_TRANSCRIPCIONES, suffix=".json")
         )
-                
-        bucket_general.add_event_notification(
-            s3.EventType.OBJECT_CREATED,
-            s3n.LambdaDestination(lambda_resumir),
-            s3.NotificationKeyFilter(prefix="transcripciones-formateadas/", suffix=".txt")
-        ) 
 
-        # Permisos para leer y escribir en el bucket
-        bucket_general.grant_read_write(lambda_transcribir)
-        bucket_general.grant_read_write(lambda_formatear)
-        bucket_general.grant_read_write(lambda_resumir)
+        # Cuando aparece un .txt en transcripciones-formateadas/ => resumir
+        self.bucket.add_event_notification(
+            s3.EventType.OBJECT_CREATED,
+            s3n.LambdaDestination(self.fn_resumir),
+            s3.NotificationKeyFilter(prefix=self.PFX_TRANSCRIPCIONES_FMT, suffix=".txt")
+        )
+
+        # 6) API Gateway (solo para kick-off de transcripción)
+        api = apigateway.RestApi(self, "TranscripcionApi",
+                                 rest_api_name="Transcripcion API",
+                                 deploy_options=apigateway.StageOptions(stage_name="prod"))
+        transcribir_res = api.root.add_resource("transcribir")
+        transcribir_res.add_method(
+            "POST",
+            apigateway.LambdaIntegration(self.fn_transcribir, proxy=True)
+        )
