@@ -9,6 +9,7 @@ from aws_cdk import (
 )
 from constructs import Construct
 
+
 class TranscripcionConResumenBackendStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -28,7 +29,8 @@ class TranscripcionConResumenBackendStack(Stack):
         common_env = {"BUCKET": self.bucket.bucket_name}
 
         self.fn_transcribir = lambda_.Function(
-            self, "proyecto1-transcribir-audios",
+            self,
+            "proyecto1-transcribir-audios",
             function_name="proyecto1-transcribir-audios",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="lambda_function.lambda_handler",
@@ -39,7 +41,8 @@ class TranscripcionConResumenBackendStack(Stack):
         )
 
         self.fn_formatear = lambda_.Function(
-            self, "proyecto1-formatear-transcripcion",
+            self,
+            "proyecto1-formatear-transcripcion",
             function_name="proyecto1-formatear-transcripcion",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="lambda_function.lambda_handler",
@@ -50,7 +53,8 @@ class TranscripcionConResumenBackendStack(Stack):
         )
 
         self.fn_resumir = lambda_.Function(
-            self, "proyecto1-resumir-transcripciones",
+            self,
+            "proyecto1-resumir-transcripciones",
             function_name="proyecto1-resumir-transcripciones",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="lambda_function.lambda_handler",
@@ -68,16 +72,25 @@ class TranscripcionConResumenBackendStack(Stack):
         # Transcribe para la Lambda de transcribir
         self.fn_transcribir.add_to_role_policy(
             iam.PolicyStatement(
-                actions=["transcribe:StartTranscriptionJob", "transcribe:GetTranscriptionJob", "transcribe:ListTranscriptionJobs"],
-                resources=["*"]  # idealmente restringir por ARN si usás Transcribe con recursos nombrados
+                actions=[
+                    "transcribe:StartTranscriptionJob",
+                    "transcribe:GetTranscriptionJob",
+                    "transcribe:ListTranscriptionJobs",
+                ],
+                resources=[
+                    "*"
+                ],  # idealmente restringir por ARN si usás Transcribe con recursos nombrados
             )
         )
 
         # Bedrock para la Lambda de resumir (restringí al ARN del modelo cuando lo tengas fijo)
         self.fn_resumir.add_to_role_policy(
             iam.PolicyStatement(
-                actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
-                resources=["*"]
+                actions=[
+                    "bedrock:InvokeModel",
+                    "bedrock:InvokeModelWithResponseStream",
+                ],
+                resources=["*"],
             )
         )
 
@@ -86,22 +99,73 @@ class TranscripcionConResumenBackendStack(Stack):
         self.bucket.add_event_notification(
             s3.EventType.OBJECT_CREATED,
             s3n.LambdaDestination(self.fn_formatear),
-            s3.NotificationKeyFilter(prefix=self.PFX_TRANSCRIPCIONES, suffix=".json")
+            s3.NotificationKeyFilter(prefix=self.PFX_TRANSCRIPCIONES, suffix=".json"),
         )
 
         # Cuando aparece un .txt en transcripciones-formateadas/ => resumir
         self.bucket.add_event_notification(
             s3.EventType.OBJECT_CREATED,
             s3n.LambdaDestination(self.fn_resumir),
-            s3.NotificationKeyFilter(prefix=self.PFX_TRANSCRIPCIONES_FMT, suffix=".txt")
+            s3.NotificationKeyFilter(
+                prefix=self.PFX_TRANSCRIPCIONES_FMT, suffix=".txt"
+            ),
         )
 
         # 6) API Gateway (solo para kick-off de transcripción)
-        api = apigateway.RestApi(self, "TranscripcionApi",
-                                 rest_api_name="Transcripcion API",
-                                 deploy_options=apigateway.StageOptions(stage_name="prod"))
+        api = apigateway.RestApi(
+            self,
+            "TranscripcionApi",
+            rest_api_name="Transcripcion API",
+            deploy_options=apigateway.StageOptions(stage_name="prod"),
+        )
         transcribir_res = api.root.add_resource("transcribir")
+
+        #Método POST
         transcribir_res.add_method(
             "POST",
-            apigateway.LambdaIntegration(self.fn_transcribir, proxy=True)
+            apigateway.LambdaIntegration(self.fn_transcribir, proxy=True),
+            method_responses=[
+                apigateway.MethodResponse(
+                    status_code="200",
+                    response_parameters={
+                        "method.response.header.Access-Control-Allow-Origin": True,
+                        "method.response.header.Access-Control-Allow-Headers": True,
+                        "method.response.header.Access-Control-Allow-Methods": True,
+                    },
+                ),
+            ],
+        )
+
+       # Método OPTIONS (preflight CORS)
+        transcribir_res.add_method(
+            "OPTIONS",
+            apigateway.MockIntegration(
+                integration_responses=[
+                    {
+                        "statusCode": "200",
+                        "responseParameters": {
+                            "method.response.header.Access-Control-Allow-Headers": "'Content-Type'",
+                            "method.response.header.Access-Control-Allow-Origin": "'*'",
+                            "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,POST'",
+                        },
+                        "responseTemplates": {
+                            "application/json": "{}"
+                        },
+                    }
+                ],
+                passthrough_behavior=apigateway.PassthroughBehavior.NEVER,
+                request_templates={
+                    "application/json": '{"statusCode": 200}'
+                },
+            ),
+            method_responses=[
+                {
+                    "statusCode": "200",
+                    "responseParameters": {
+                        "method.response.header.Access-Control-Allow-Headers": True,
+                        "method.response.header.Access-Control-Allow-Origin": True,
+                        "method.response.header.Access-Control-Allow-Methods": True,
+                    },
+                }
+            ]
         )
