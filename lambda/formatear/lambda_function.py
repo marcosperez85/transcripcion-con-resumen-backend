@@ -10,26 +10,13 @@ s3_client = boto3.client('s3')
 output_bucket = os.environ['BUCKET']
 
 def lambda_handler(event, context):
-    # record = event['Records'][0]
-    # bucket = record['s3']['bucket']['name']
-    # key = record['s3']['object']['key']
-
     # Verifica que el evento contiene los datos correctamente
     logger.info(f"Received event: {json.dumps(event)}")
 
-    if 'body' in event:
-        try:
-            body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']
-        except Exception as e:
-            logger.error(f"Error al parsear 'body': {str(e)}")
-            raise
-    else:
-        body = event
-
-    logger.info(f"El body del mensaje contiene: {body}")
-    
-    bucket = body['s3']['bucketName']    
-    key = body['s3']['key']
+    # Tomar SIEMPRE el record S3
+    record = event['Records'][0]
+    bucket = record['s3']['bucket']['name']
+    key = record['s3']['object']['key']
 
     if not key.endswith(".json") or not key.startswith("transcripciones/"):
         logger.warning(f"Ignorando archivo no válido: {key}")
@@ -75,17 +62,6 @@ def lambda_handler(event, context):
         )
 
         logger.info(f"Archivo TXT guardado en: s3://{bucket}/{txt_key}")
-
-        return {
-            "statusCode": 200,
-            "headers": {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*"
-            },
-            "body": json.dumps({
-                "transcripcion": output_text.strip()
-            })
-        }
 
     except Exception as e:
         logger.error(f"Error al procesar transcripción: {str(e)}")
