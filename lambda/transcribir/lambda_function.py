@@ -2,344 +2,233 @@ import json
 import boto3
 import uuid
 import os
+import urllib.parse
 from datetime import datetime
 
 # Inicializar clientes AWS
 transcribe_client = boto3.client('transcribe')
-dynamodb = boto3.resource('dynamodb')
-apigateway_client = None  # Se inicializará si hay endpoint WebSocket
+s3_client = boto3.client('s3')
+
+# Variables de entorno
+TRANSCRIPTION_BUCKET = os.environ.get('TRANSCRIPTION_BUCKET')
+WEBSOCKET_API_ENDPOINT = os.environ.get('WEBSOCKET_API_ENDPOINT')
 
 def lambda_handler(event, context):
+    """
+    Función Lambda que se ejecuta cuando se sube un archivo a S3
+    e inicia la transcripción con AWS Transcribe
+    """
     try:
-        # Parsear el cuerpo del evento si viene de API Gateway
-        if isinstance(event.get('body'), str):
-            body = json.loads(event['body'])
-        else:
-            body = event
+        print(f"Evento recibido: {json.dumps(event, default=str)}")
         
-        # Verificar que el evento contiene los datos correctamente
-        if not body.get('s3') or not body.get('transcribe'):
-            return {
-                'statusCode': 400,
-                'headers': get_cors_headers(),
-                'body': json.dumps({
-                    'error': 'Faltan datos requeridos: s3 o transcribe'
-                })
-            }
-        
-        s3_data = body['s3']
-        transcribe_data = body['transcribe']
-        
-        # Validar datos de S3
-        bucket_name = s3_data.get('bucketName')
-        file_key = s3_data.get('key')
-        
-        if not bucket_name or not file_key:
-            return {
-                'statusCode': 400,
-                'headers': get_cors_headers(),
-                'body': json.dumps({
-                    'error': 'Faltan bucketName o key en datos de S3'
-                })
-            }
-        
-        # Validar datos de transcripción
-        language_code = transcribe_data.get('languageCode', 'es-ES')
-        max_speakers = transcribe_data.get('maxSpeakers', 2)
-        
-        # Generar nombre único para el job
-        job_name = f"transcription-job-{str(uuid.uuid4())}"
-        
-        # Obtener sessionId del evento (enviado por el frontend)
-        session_id = body.get('sessionId', job_name)
-        
-        # Configurar la URI del archivo en S3
-        media_uri = f"s3://{bucket_name}/{file_key}"
-        
-        # Configurar parámetros para el job de transcripción
-        job_params = {
-            'TranscriptionJobName': job_name,
-            'Media': {
-                'MediaFileUri': media_uri
-            },
-            'MediaFormat': get_media_format(file_key),
-            'LanguageCode': language_code,
-            'Settings': {
-                'ShowSpeakerLabels': True,
-                'MaxSpeakerLabels': max_speakers,
-                'ChannelIdentification': False
-            },
-            'OutputBucketName': bucket_name,
-            'OutputKey': f'transcriptions/{job_name}.json'
-        }
-        
-        print(f"Iniciando job de transcripción: {job_name}")
-        print(f"Parámetros: {json.dumps(job_params, default=str)}")
-        
-        # Iniciar el job de transcripción
-        response = transcribe_client.start_transcription_job(**job_params)
-        
-        print(f"Job iniciado exitosamente: {response.get('TranscriptionJob', {}).get('TranscriptionJobStatus', 'UNKNOWN')}")
-        
-        # Guardar la información del job en DynamoDB si la tabla existe
-        save_job_info(job_name, session_id, bucket_name, file_key, language_code, max_speakers)
-        
-        # Notificar vía WebSocket que la transcripción ha comenzado
-        notify_websocket_clients(session_id, {
-            'type': 'TRANSCRIPTION_STARTED',
-            'jobName': job_name,
-            'status': 'IN_PROGRESS',
-            'message': 'Transcripción iniciada correctamente',
-            'timestamp': datetime.now().isoformat(),
-            'stage': 'TRANSCRIBING',
-            'details': {
-                'languageCode': language_code,
-                'maxSpeakers': max_speakers,
-                'fileKey': file_key
-            }
-        })
+        # Procesar cada record del evento S3
+        for record in event['Records']:
+            # Verificar que es un evento de S3
+            if record['eventSource'] != 'aws:s3':
+                print(f"Evento ignorado - no es de S3: {record['eventSource']}")
+                continue
+                
+            # Obtener información del archivo subido
+            bucket_name = record['s3']['bucket']['name']
+            object_key = urllib.parse.unquote_plus(record['s3']['object']['key'], encoding='utf-8')
+            
+            print(f"Procesando archivo: s3://{bucket_name}/{object_key}")
+            
+            # Verificar que el archivo tiene una extensión de audio/video válida
+            if not is_valid_media_file(object_key):
+                print(f"Archivo ignorado - formato no válido: {object_key}")
+                continue
+            
+            # Extraer session_id del path del objeto (asumiendo estructura: sessions/{session_id}/audio.mp3)
+            session_id = extract_session_id_from_path(object_key)
+            if not session_id:
+                print(f"No se pudo extraer session_id del path: {object_key}")
+                continue
+            
+            # Iniciar proceso de transcripción
+            result = start_transcription(bucket_name, object_key, session_id)
+            
+            # Notificar via WebSocket del inicio de transcripción
+            if result['success']:
+                notify_websocket_transcription_started(session_id, result['job_name'])
+            else:
+                notify_websocket_error(session_id, result['error'])
         
         return {
             'statusCode': 200,
-            'headers': get_cors_headers(),
             'body': json.dumps({
-                'jobName': job_name,
-                'sessionId': session_id,
-                'status': 'IN_PROGRESS',
-                'message': 'Job de transcripción iniciado correctamente',
-                'details': {
-                    'mediaUri': media_uri,
-                    'languageCode': language_code,
-                    'maxSpeakers': max_speakers,
-                    'outputKey': f'transcriptions/{job_name}.json'
-                }
+                'message': 'Procesamiento completado',
+                'processedRecords': len(event['Records'])
             })
         }
         
     except Exception as e:
         print(f"Error en lambda_handler: {str(e)}")
-        
-        # Notificar error vía WebSocket si es posible
-        session_id = body.get('sessionId') if 'body' in locals() else None
-        if session_id:
-            notify_websocket_clients(session_id, {
-                'type': 'ERROR',
-                'message': f'Error al iniciar transcripción: {str(e)}',
-                'timestamp': datetime.utcnow().isoformat(),
-                'stage': 'TRANSCRIPTION_START',
-                'error': str(e)
-            })
-        
         return {
             'statusCode': 500,
-            'headers': get_cors_headers(),
-            'body': json.dumps({
-                'error': f'Error interno del servidor: {str(e)}'
-            })
+            'body': json.dumps({'error': f'Error procesando evento S3: {str(e)}'})
         }
 
-def get_media_format(file_key):
-    """Determina el formato del archivo basado en la extensión"""
-    extension = file_key.lower().split('.')[-1]
+def is_valid_media_file(file_path):
+    """Verifica si el archivo tiene una extensión válida para transcripción"""
+    valid_extensions = ['.mp3', '.mp4', '.wav', '.flac', '.ogg', '.amr', '.webm', '.m4a']
+    return any(file_path.lower().endswith(ext) for ext in valid_extensions)
+
+def extract_session_id_from_path(object_key):
+    """
+    Extrae el session_id del path del objeto S3
+    Asume estructura: sessions/{session_id}/filename.ext
+    """
+    try:
+        parts = object_key.split('/')
+        if len(parts) >= 2 and parts[0] == 'sessions':
+            return parts[1]
+        return None
+    except Exception as e:
+        print(f"Error extrayendo session_id: {str(e)}")
+        return None
+
+def start_transcription(bucket_name, object_key, session_id):
+    """Inicia el trabajo de transcripción en AWS Transcribe"""
+    try:
+        # Generar nombre único para el trabajo
+        job_name = f"transcribe-job-{session_id}-{uuid.uuid4().hex[:8]}"
+        
+        # URI del archivo en S3
+        media_uri = f"s3://{bucket_name}/{object_key}"
+        
+        # URI de salida (mismo bucket, carpeta de resultados)
+        output_key = f"sessions/{session_id}/transcriptions/"
+        output_bucket_name = TRANSCRIPTION_BUCKET or bucket_name
+        
+        print(f"Iniciando transcripción - Job: {job_name}, URI: {media_uri}")
+        
+        # Configuración del trabajo de transcripción
+        transcribe_config = {
+            'TranscriptionJobName': job_name,
+            'LanguageCode': 'es-ES',  # Español por defecto
+            'Media': {
+                'MediaFileUri': media_uri
+            },
+            'OutputBucketName': output_bucket_name,
+            'OutputKey': output_key,
+            'Settings': {
+                'ShowSpeakerLabels': True,
+                'MaxSpeakerLabels': 10,
+                'ShowAlternatives': True,
+                'MaxAlternatives': 3
+            }
+        }
+        
+        # Detectar formato de archivo y configurar si es necesario
+        file_format = detect_media_format(object_key)
+        if file_format:
+            transcribe_config['MediaFormat'] = file_format
+        
+        # Iniciar trabajo de transcripción
+        response = transcribe_client.start_transcription_job(**transcribe_config)
+        
+        print(f"Trabajo de transcripción iniciado exitosamente: {job_name}")
+        
+        return {
+            'success': True,
+            'job_name': job_name,
+            'transcription_job': response['TranscriptionJob']
+        }
+        
+    except Exception as e:
+        error_msg = f"Error iniciando transcripción: {str(e)}"
+        print(error_msg)
+        return {
+            'success': False,
+            'error': error_msg
+        }
+
+def detect_media_format(file_path):
+    """Detecta el formato del archivo de media basado en la extensión"""
+    extension = file_path.lower().split('.')[-1]
     
     format_mapping = {
         'mp3': 'mp3',
         'mp4': 'mp4',
         'wav': 'wav',
         'flac': 'flac',
-        'm4a': 'mp4',
         'ogg': 'ogg',
+        'amr': 'amr',
         'webm': 'webm',
-        'amr': 'amr'
+        'm4a': 'm4a'
     }
     
-    detected_format = format_mapping.get(extension, 'mp3')
-    print(f"Formato detectado para {file_key}: {detected_format}")
-    
-    return detected_format
+    return format_mapping.get(extension)
 
-def get_cors_headers():
-    """Retorna headers CORS estándar"""
-    return {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS, GET'
-    }
-
-def save_job_info(job_name, session_id, bucket_name, file_key, language_code, max_speakers):
-    """Guarda información del job en DynamoDB si la tabla existe"""
+def notify_websocket_transcription_started(session_id, job_name):
+    """Notifica via WebSocket que se inició la transcripción"""
     try:
-        jobs_table_name = os.environ.get('JOBS_TABLE', 'transcription-jobs')
-        jobs_table = dynamodb.Table(jobs_table_name)
+        if not WEBSOCKET_API_ENDPOINT:
+            print("WEBSOCKET_API_ENDPOINT no configurado")
+            return
         
-        item = {
-            'jobName': job_name,
+        message = {
+            'type': 'TRANSCRIPTION_STARTED',
             'sessionId': session_id,
+            'jobName': job_name,
+            'timestamp': datetime.utcnow().isoformat(),
             'status': 'IN_PROGRESS',
-            'stage': 'TRANSCRIBING',
-            'bucketName': bucket_name,
-            'fileKey': file_key,
-            'languageCode': language_code,
-            'maxSpeakers': max_speakers,
-            'createdAt': datetime.utcnow().isoformat(),
-            'updatedAt': datetime.utcnow().isoformat(),
-            'mediaUri': f"s3://{bucket_name}/{file_key}",
-            'outputKey': f'transcriptions/{job_name}.json'
+            'message': 'Transcripción iniciada correctamente'
         }
         
-        jobs_table.put_item(Item=item)
-        print(f"Job info guardada en DynamoDB: {job_name}")
-        
-        return True
+        # Invocar la función de WebSocket para enviar el mensaje
+        invoke_websocket_function(session_id, message)
         
     except Exception as e:
-        print(f"Error guardando en DynamoDB: {str(e)}")
-        # No fallar si no se puede guardar en DynamoDB
-        return False
+        print(f"Error notificando inicio de transcripción: {str(e)}")
 
-def notify_websocket_clients(session_id, message):
-    """Notifica a los clientes WebSocket conectados"""
+def notify_websocket_error(session_id, error_message):
+    """Notifica via WebSocket que ocurrió un error"""
     try:
-        websocket_endpoint = os.environ.get('WEBSOCKET_API_ENDPOINT')
-        if not websocket_endpoint:
-            print("No WebSocket endpoint configurado, saltando notificación")
-            return False
+        if not WEBSOCKET_API_ENDPOINT:
+            print("WEBSOCKET_API_ENDPOINT no configurado")
+            return
         
-        # Inicializar cliente API Gateway Management si no existe
-        global apigateway_client
-        if not apigateway_client:
-            apigateway_client = boto3.client(
-                'apigatewaymanagementapi',
-                endpoint_url=websocket_endpoint
-            )
+        message = {
+            'type': 'TRANSCRIPTION_ERROR',
+            'sessionId': session_id,
+            'timestamp': datetime.utcnow().isoformat(),
+            'status': 'ERROR',
+            'error': error_message
+        }
         
-        # Buscar conexiones activas para esta sesión
-        connections_table_name = os.environ.get('CONNECTIONS_TABLE', 'websocket-connections')
-        connections_table = dynamodb.Table(connections_table_name)
+        # Invocar la función de WebSocket para enviar el mensaje
+        invoke_websocket_function(session_id, message)
         
-        print(f"Buscando conexiones para sesión: {session_id}")
+    except Exception as e:
+        print(f"Error notificando error de transcripción: {str(e)}")
+
+def invoke_websocket_function(session_id, message):
+    """Invoca la función Lambda de WebSocket para enviar mensajes"""
+    try:
+        lambda_client = boto3.client('lambda')
         
-        # Buscar por sessionId
-        response = connections_table.scan(
-            FilterExpression='sessionId = :sid AND #status = :status',
-            ExpressionAttributeNames={'#status': 'status'},
-            ExpressionAttributeValues={
-                ':sid': session_id,
-                ':status': 'CONNECTED'
-            }
+        # Nombre de la función de WebSocket (debería ser variable de entorno)
+        websocket_function_name = os.environ.get('WEBSOCKET_FUNCTION_NAME')
+        
+        if not websocket_function_name:
+            print("WEBSOCKET_FUNCTION_NAME no configurado")
+            return
+        
+        payload = {
+            'action': 'broadcast',
+            'sessionId': session_id,
+            'message': message
+        }
+        
+        response = lambda_client.invoke(
+            FunctionName=websocket_function_name,
+            InvocationType='Event',  # Asíncrono
+            Payload=json.dumps(payload)
         )
         
-        connections = response.get('Items', [])
-        success_count = 0
-        
-        if not connections:
-            print(f"No se encontraron conexiones activas para la sesión {session_id}")
-            return False
-        
-        # Convertir mensaje a JSON
-        message_data = json.dumps(message) if not isinstance(message, str) else message
-        
-        # Enviar mensaje a todas las conexiones de esta sesión
-        for item in connections:
-            connection_id = item['connectionId']
-            try:
-                apigateway_client.post_to_connection(
-                    ConnectionId=connection_id,
-                    Data=message_data
-                )
-                success_count += 1
-                print(f"Mensaje enviado a conexión {connection_id}")
-                
-            except apigateway_client.exceptions.GoneException:
-                print(f"Conexión {connection_id} ya no existe, eliminando")
-                # Limpiar conexión inválida
-                try:
-                    connections_table.delete_item(Key={'connectionId': connection_id})
-                except Exception as delete_error:
-                    print(f"Error eliminando conexión: {delete_error}")
-                    
-            except Exception as send_error:
-                print(f"Error enviando mensaje a {connection_id}: {send_error}")
-        
-        print(f"Mensaje enviado a {success_count}/{len(connections)} conexiones")
-        return success_count > 0
-                    
-    except Exception as e:
-        print(f"Error en notify_websocket_clients: {str(e)}")
-        # No fallar si no se puede enviar notificación WebSocket
-        return False
-
-def validate_transcription_job_params(job_params):
-    """Valida los parámetros del job de transcripción antes de enviarlo"""
-    try:
-        required_fields = ['TranscriptionJobName', 'Media', 'MediaFormat', 'LanguageCode']
-        
-        for field in required_fields:
-            if field not in job_params:
-                raise ValueError(f"Campo requerido faltante: {field}")
-        
-        # Validar Media URI
-        media_uri = job_params['Media'].get('MediaFileUri', '')
-        if not media_uri.startswith('s3://'):
-            raise ValueError("Media URI debe ser una URL S3 válida")
-        
-        # Validar formato de idioma
-        language_code = job_params['LanguageCode']
-        if len(language_code.split('-')) != 2:
-            raise ValueError("Código de idioma debe tener formato 'xx-XX' (ej: es-ES, en-US)")
-        
-        # Validar MaxSpeakerLabels si está presente
-        if 'Settings' in job_params and 'MaxSpeakerLabels' in job_params['Settings']:
-            max_speakers = job_params['Settings']['MaxSpeakerLabels']
-            if not isinstance(max_speakers, int) or max_speakers < 2 or max_speakers > 10:
-                raise ValueError("MaxSpeakerLabels debe ser un entero entre 2 y 10")
-        
-        print("Parámetros de transcripción validados correctamente")
-        return True
+        print(f"Mensaje WebSocket enviado para sesión {session_id}")
         
     except Exception as e:
-        print(f"Error validando parámetros: {str(e)}")
-        raise e
-
-def get_job_status(job_name):
-    """Obtiene el estado actual de un job de transcripción"""
-    try:
-        response = transcribe_client.get_transcription_job(
-            TranscriptionJobName=job_name
-        )
-        
-        job = response.get('TranscriptionJob', {})
-        status = job.get('TranscriptionJobStatus', 'UNKNOWN')
-        
-        print(f"Estado del job {job_name}: {status}")
-        return status
-        
-    except Exception as e:
-        print(f"Error obteniendo estado del job {job_name}: {str(e)}")
-        return 'ERROR'
-
-def cleanup_failed_job(job_name):
-    """Limpia recursos de un job que falló"""
-    try:
-        print(f"Limpiando recursos del job fallido: {job_name}")
-        
-        # Actualizar estado en DynamoDB
-        jobs_table_name = os.environ.get('JOBS_TABLE', 'transcription-jobs')
-        jobs_table = dynamodb.Table(jobs_table_name)
-        
-        jobs_table.update_item(
-            Key={'jobName': job_name},
-            UpdateExpression='SET #status = :status, updatedAt = :timestamp, errorMessage = :error',
-            ExpressionAttributeNames={'#status': 'status'},
-            ExpressionAttributeValues={
-                ':status': 'FAILED',
-                ':timestamp': datetime.utcnow().isoformat(),
-                ':error': 'Job failed during initialization'
-            }
-        )
-        
-        print(f"Estado del job {job_name} actualizado a FAILED")
-        
-    except Exception as e:
-        print(f"Error en limpieza del job {job_name}: {str(e)}")
+        print(f"Error invocando función WebSocket: {str(e)}")
