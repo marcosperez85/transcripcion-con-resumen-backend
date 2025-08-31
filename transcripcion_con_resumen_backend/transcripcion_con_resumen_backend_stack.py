@@ -185,26 +185,62 @@ class TranscripcionConResumenBackendStack(Stack):
 
         # ========== PERMISOS ==========
         
+        # Permisos CloudWatch Logs
+        cloudwatch_logs_policy = iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=[
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+            ],
+            resources=[f"arn:aws:logs:{self.region}:{self.account}:*"]
+        )
+
         # Permisos DynamoDB
         for fn in [websocket_handler, event_handler, self.fn_transcribir, self.fn_formatear, self.fn_resumir]:
             connections_table.grant_read_write_data(fn)
             jobs_table.grant_read_write_data(fn)
-        
-        # Permisos S3
+            fn.add_to_role_policy(cloudwatch_logs_policy)
+
+        # Permisos S3 mejorados
+        s3_policy = iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=[
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "s3:GetObjectMetadata",
+                "s3:GetObjectTagging",
+                "s3:PutObjectTagging",
+                "s3:ListBucket"
+            ],
+            resources=[
+                f"{self.bucket.bucket_arn}/*",
+                f"{self.bucket.bucket_arn}"
+            ]
+        )
+
         for fn in [self.fn_transcribir, self.fn_formatear, self.fn_resumir, event_handler]:
             self.bucket.grant_read_write(fn)
-        
-        # Permisos para API Gateway Management
+            fn.add_to_role_policy(s3_policy)
+
+        # Permisos mejorados para API Gateway Management
         websocket_management_policy = iam.PolicyStatement(
             effect=iam.Effect.ALLOW,
-            actions=["execute-api:ManageConnections"],
-            resources=[f"arn:aws:execute-api:{self.region}:{self.account}:{websocket_api.api_id}/*/*"]
+            actions=[
+                "execute-api:ManageConnections",
+                "execute-api:Invoke"
+            ],
+            resources=[
+                f"arn:aws:execute-api:{self.region}:{self.account}:{websocket_api.api_id}/*/*/*",
+                f"arn:aws:execute-api:{self.region}:{self.account}:{websocket_api.api_id}/*/POST/@connections/*"
+            ]
         )
-        
+
         for fn in [websocket_handler, event_handler, self.fn_transcribir, self.fn_formatear, self.fn_resumir]:
             fn.add_to_role_policy(websocket_management_policy)
 
-        # Permisos Transcribe
+        # Permisos Transcribe (mantener existente)
         self.fn_transcribir.add_to_role_policy(
             iam.PolicyStatement(
                 effect=iam.Effect.ALLOW,
@@ -217,7 +253,7 @@ class TranscripcionConResumenBackendStack(Stack):
             )
         )
 
-        # Permisos Bedrock
+        # Permisos Bedrock (mantener existente)
         self.fn_resumir.add_to_role_policy(
             iam.PolicyStatement(
                 effect=iam.Effect.ALLOW,
@@ -227,6 +263,19 @@ class TranscripcionConResumenBackendStack(Stack):
                     "bedrock:ListFoundationModels",
                 ],
                 resources=["*"],
+            )
+        )
+
+        # Permisos EventBridge
+        event_handler.add_to_role_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "events:PutEvents",
+                    "events:List*",
+                    "events:Describe*"
+                ],
+                resources=["*"]
             )
         )
         
