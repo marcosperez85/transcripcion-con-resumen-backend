@@ -298,14 +298,7 @@ class TranscripcionConResumenBackendStack(Stack):
                 allow_headers=["Content-Type", "Authorization"]
             )
         )
-
-        # transcribir_res = api.root.add_resource("transcribir")
         
-        # transcribir_res.add_method(
-        #     "POST",
-        #     apigateway.LambdaIntegration(self.fn_transcribir, proxy=True)
-        # )
-
         # ========== OUTPUTS ==========
 
         CfnOutput(
