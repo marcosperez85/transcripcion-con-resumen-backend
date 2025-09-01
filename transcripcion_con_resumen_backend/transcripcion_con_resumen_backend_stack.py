@@ -6,6 +6,7 @@ from aws_cdk import (
     aws_iam as iam,
     aws_apigateway as apigateway,
     aws_s3_notifications as s3n,
+    RemovalPolicy
 )
 from constructs import Construct
 
@@ -13,10 +14,23 @@ from constructs import Construct
 class TranscripcionConResumenBackendStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
-
+        
         # 1) Bucket único (usa prefijos)
         bucket_name = "transcripcion-con-resumen"
-        self.bucket = s3.Bucket.from_bucket_name(self, "BucketGeneral", bucket_name)
+        self.bucket = s3.Bucket(
+            self,
+            "BucketGeneral",
+            bucket_name=bucket_name,
+            cors=[
+                s3.CorsRule(
+                    allowed_methods=[s3.HttpMethods.GET, s3.HttpMethods.POST, s3.HttpMethods.PUT, s3.HttpMethods.DELETE, s3.HttpMethods.HEAD],
+                    allowed_origins=["*"],
+                    allowed_headers=["*"],
+                    max_age=3000,
+                )],
+            removal_policy=RemovalPolicy.DESTROY,
+            auto_delete_objects=True,   # elimina los objetos antes de borrar el bucket
+        )
 
         # Prefijos (solo constantes para usar en filtros/keys)
         self.PFX_AUDIOS = "audios/"
