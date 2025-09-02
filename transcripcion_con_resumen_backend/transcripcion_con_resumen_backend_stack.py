@@ -16,7 +16,7 @@ class TranscripcionConResumenBackendStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
         
         # 1) Bucket único (usa prefijos)
-        bucket_name = "transcripcion-con-resumen"
+        bucket_name = "transcripcion-con-resumen-backend"
         self.bucket = s3.Bucket(
             self,
             "BucketGeneral",
