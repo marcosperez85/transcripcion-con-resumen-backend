@@ -1,58 +1,159 @@
+# Transcripción con Resumen - Backend (Spanish version)
 
-# Welcome to your CDK Python project!
+Este proyecto implementa un backend serverless en AWS para un sistema de transcripción y resumen de audio utilizando AWS CDK con Python.
 
-This is a blank project for CDK development with Python.
+## Descripción del Proyecto
 
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
+El sistema está compuesto por dos funciones Lambda principales:
 
-This project is set up like a standard Python project.  The initialization
-process also creates a virtualenv within this project, stored under the `.venv`
-directory.  To create the virtualenv it assumes that there is a `python3`
-(or `python` for Windows) executable in your path with access to the `venv`
-package. If for any reason the automatic creation of the virtualenv fails,
-you can create the virtualenv manually.
+- **Lambda Transcribir** (`lambda/transcribir/lambda_function.py`): Se encarga de procesar archivos de audio y convertirlos en texto utilizando servicios de transcripción de AWS.
+- **Lambda Formatear** (`lambda/formatear/lambda_function.py`): Procesa el texto transcrito para generar resúmenes y dar formato al contenido.
 
-To manually create a virtualenv on MacOS and Linux:
+## Arquitectura
 
-```
-$ python -m venv .venv
-```
+El proyecto utiliza:
+- **AWS CDK (Cloud Development Kit)** para la infraestructura como código
+- **AWS Lambda** para el procesamiento serverless
+- **Python** como lenguaje de programación principal
 
-After the init process completes and the virtualenv is created, you can use the following
-step to activate your virtualenv.
+La infraestructura se define en `transcripcion_con_resumen_backend_stack.py` utilizando CDK.
 
-```
-$ source .venv/bin/activate
-```
+## Configuración del Entorno
 
-If you are a Windows platform, you would activate the virtualenv like this:
+### Prerrequisitos
+- Python 3.x
+- AWS CLI configurado
+- AWS CDK instalado
 
-```
-% .venv\Scripts\activate.bat
-```
+### Instalación
 
-Once the virtualenv is activated, you can install the required dependencies.
-
-```
-$ pip install -r requirements.txt
+1. Clona el repositorio y navega al directorio del proyecto:
+```bash
+cd transcripcion-con-resumen-backend
 ```
 
-At this point you can now synthesize the CloudFormation template for this code.
+2. Crea y activa el entorno virtual:
+```bash
+python -m venv .venv
+source .venv/bin/activate  # En Windows: .venv\Scripts\activate.bat
+```
+
+3. Instala las dependencias:
+```bash
+pip install -r requirements.txt
+```
+
+## Despliegue
+
+1. Sintetiza la plantilla de CloudFormation:
+```bash
+cdk synth
+```
+
+2. Despliega la infraestructura:
+```bash
+cdk deploy
+```
+
+## Estructura del Proyecto
 
 ```
-$ cdk synth
+transcripcion-con-resumen-backend/
+├── lambda/
+│   ├── transcribir/
+│   │   └── lambda_function.py    # Función para transcripción de audio
+│   └── formatear/
+│       └── lambda_function.py    # Función para formateo y resumen
+├── transcripcion_con_resumen_backend/
+│   └── transcripcion_con_resumen_backend_stack.py  # Definición de infraestructura CDK
+└── README.md
 ```
 
-To add additional dependencies, for example other CDK libraries, just add
-them to your `setup.py` file and rerun the `pip install -r requirements.txt`
-command.
+## Comandos Útiles
 
-## Useful commands
+* `cdk ls`          lista todos los stacks en la aplicación
+* `cdk synth`       emite la plantilla de CloudFormation sintetizada
+* `cdk deploy`      despliega este stack en tu cuenta/región de AWS por defecto
+* `cdk diff`        compara el stack desplegado con el estado actual
+* `cdk docs`        abre la documentación de CDK
 
- * `cdk ls`          list all stacks in the app
- * `cdk synth`       emits the synthesized CloudFormation template
- * `cdk deploy`      deploy this stack to your default AWS account/region
- * `cdk diff`        compare deployed stack with current state
- * `cdk docs`        open CDK documentation
 
-Enjoy!
+# Transcription with Summary - Backend (Englis version)
+
+This project implements a serverless backend on AWS for an audio transcription and summarization system using AWS CDK with Python.
+
+## Project Description
+
+The system consists of two main Lambda functions:
+
+- **Transcribe Lambda** (`lambda/transcribir/lambda_function.py`): Handles audio file processing and converts them to text using AWS transcription services.
+- **Format Lambda** (`lambda/formatear/lambda_function.py`): Processes the transcribed text to generate summaries and format the content.
+
+## Architecture
+
+The project utilizes:
+- **AWS CDK (Cloud Development Kit)** for infrastructure as code
+- **AWS Lambda** for serverless processing
+- **Python** as the main programming language
+
+The infrastructure is defined in `transcripcion_con_resumen_backend_stack.py` using CDK.
+
+## Environment Setup
+
+### Prerequisites
+- Python 3.x
+- AWS CLI configured
+- AWS CDK installed
+
+### Installation
+
+1. Clone the repository and navigate to the project directory:
+```bash
+cd transcripcion-con-resumen-backend
+```
+
+2. Create and activate the virtual environment:
+```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate.bat
+```
+
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+## Deployment
+
+1. Synthesize the CloudFormation template:
+```bash
+cdk synth
+```
+
+2. Deploy the infrastructure:
+```bash
+cdk deploy
+```
+
+## Project Structure
+
+```
+transcripcion-con-resumen-backend/
+├── lambda/
+│   ├── transcribir/
+│   │   └── lambda_function.py    # Function for audio transcription
+│   └── formatear/
+│       └── lambda_function.py    # Function for formatting and summarization
+├── transcripcion_con_resumen_backend/
+│   └── transcripcion_con_resumen_backend_stack.py  # CDK infrastructure definition
+└── README.md
+```
+
+## Useful Commands
+
+* `cdk ls`          list all stacks in the app
+* `cdk synth`       emits the synthesized CloudFormation template
+* `cdk deploy`      deploy this stack to your default AWS account/region
+* `cdk diff`        compare deployed stack with current state
+* `cdk docs`        open CDK documentation
+
