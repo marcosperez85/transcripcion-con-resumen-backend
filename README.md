@@ -1,5 +1,9 @@
 # Transcripción con Resumen - Backend (Spanish version)
 
+[English](#english) | [Español](#español)
+
+## Español
+
 Este proyecto implementa un backend serverless en AWS para un sistema de transcripción y resumen de audio utilizando AWS CDK con Python.
 
 ## Descripción del Proyecto
@@ -77,6 +81,9 @@ transcripcion-con-resumen-backend/
 * `cdk diff`        compara el stack desplegado con el estado actual
 * `cdk docs`        abre la documentación de CDK
 
+---
+
+## English
 
 # Transcription with Summary - Backend (Englis version)
 
@@ -156,4 +163,3 @@ transcripcion-con-resumen-backend/
 * `cdk deploy`      deploy this stack to your default AWS account/region
 * `cdk diff`        compare deployed stack with current state
 * `cdk docs`        open CDK documentation
-
