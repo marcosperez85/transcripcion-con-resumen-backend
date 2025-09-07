@@ -32,7 +32,8 @@ class TranscripcionConResumenBackendStack(Stack):
                         s3.HttpMethods.POST,
                         s3.HttpMethods.PUT,
                     ],
-                    allowed_origins=["*"],
+                    # Limito el origen permitido del CORS para que sólo mi CloudFront distribution pueda hacer API calls
+                    allowed_origins=["https://d1cssc0skay50s.cloudfront.net"],
                     allowed_headers=["*"],
                     max_age=3000,
                 )
@@ -137,9 +138,6 @@ class TranscripcionConResumenBackendStack(Stack):
             )
         )
 
-        # for fn in [self.fn_transcribir, self.fn_formatear, self.fn_resumir]:
-        #     self.bucket.grant_read_write(fn)
-
         # 4 Permisos específicos de servicio
         # Transcribe para la Lambda de transcribir
         self.fn_transcribir.add_to_role_policy(
@@ -220,7 +218,7 @@ class TranscripcionConResumenBackendStack(Stack):
                         "statusCode": "200",
                         "responseParameters": {
                             "method.response.header.Access-Control-Allow-Headers": "'Content-Type'",
-                            "method.response.header.Access-Control-Allow-Origin": "'*'",
+                            "method.response.header.Access-Control-Allow-Origin": "'https://d1cssc0skay50s.cloudfront.net'",
                             "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,POST'",
                         },
                         "responseTemplates": {"application/json": "{}"},
