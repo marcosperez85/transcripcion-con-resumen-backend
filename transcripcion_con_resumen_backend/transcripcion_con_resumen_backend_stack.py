@@ -94,9 +94,51 @@ class TranscripcionConResumenBackendStack(Stack):
             memory_size=512,
         )
 
-        # 3 Permisos de bucket
-        for fn in [self.fn_transcribir, self.fn_formatear, self.fn_resumir]:
-            self.bucket.grant_read_write(fn)
+        # 3 Permisos de bucket más específicos
+        # Transcribir: lee audios, escribe en transcripciones
+        self.fn_transcribir.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["s3:GetObject"],
+                resources=[f"{self.bucket.bucket_arn}/{self.PFX_AUDIOS}*"],
+            )
+        )
+        self.fn_transcribir.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["s3:PutObject"],
+                resources=[f"{self.bucket.bucket_arn}/{self.PFX_TRANSCRIPCIONES}*"],
+            )
+        )
+
+        # Formatear: lee transcripciones, escribe formateadas
+        self.fn_formatear.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["s3:GetObject"],
+                resources=[f"{self.bucket.bucket_arn}/{self.PFX_TRANSCRIPCIONES}*"],
+            )
+        )
+        self.fn_formatear.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["s3:PutObject"],
+                resources=[f"{self.bucket.bucket_arn}/{self.PFX_TRANSCRIPCIONES_FMT}*"],
+            )
+        )
+
+        # Resumir: lee formateadas, escribe resúmenes
+        self.fn_resumir.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["s3:GetObject"],
+                resources=[f"{self.bucket.bucket_arn}/{self.PFX_TRANSCRIPCIONES_FMT}*"],
+            )
+        )
+        self.fn_resumir.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["s3:PutObject"],
+                resources=[f"{self.bucket.bucket_arn}/{self.PFX_RESUMENES}*"],
+            )
+        )
+
+        # for fn in [self.fn_transcribir, self.fn_formatear, self.fn_resumir]:
+        #     self.bucket.grant_read_write(fn)
 
         # 4 Permisos específicos de servicio
         # Transcribe para la Lambda de transcribir
@@ -123,7 +165,7 @@ class TranscripcionConResumenBackendStack(Stack):
                 # Especifico sólo los modelos que realmente uso
                 resources=[
                     f"arn:aws:bedrock:{self.region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
-                    f"arn:aws:bedrock:{self.region}::foundation-model/amazon.titan-text-premier-v1:0",          
+                    f"arn:aws:bedrock:{self.region}::foundation-model/amazon.titan-text-premier-v1:0",
                 ],
             )
         )
