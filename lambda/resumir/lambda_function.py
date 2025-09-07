@@ -9,7 +9,6 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Nombre del bucket de entrada y salida
-inputBucketName = "transcripcion-con-resumen"
 output_bucket = os.environ['BUCKET']
 
 # Crear clientes de AWS
