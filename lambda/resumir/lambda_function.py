@@ -12,7 +12,7 @@ logger.setLevel(logging.INFO)
 output_bucket = os.environ['BUCKET']
 
 # Crear clientes de AWS
-bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
+bedrock = boto3.client('bedrock-runtime', region_name=os.environ['AWS_REGION'])
 s3 = boto3.client('s3')
 
 def lambda_handler(event, context):
