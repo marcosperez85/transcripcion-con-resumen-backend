@@ -6,30 +6,48 @@ from aws_cdk import (
     aws_iam as iam,
     aws_apigateway as apigateway,
     aws_s3_notifications as s3n,
-    RemovalPolicy
+    RemovalPolicy,
+    core,
 )
 from constructs import Construct
+
+# Días en los que se borran automáticamente los objetos alojados en el bucket de backend
+dias_de_expiracion = 3
 
 
 class TranscripcionConResumenBackendStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
-        
-        # 1) Bucket único (usa prefijos)
-        bucket_name = "transcripcion-con-resumen-backend"
+
+        # 1 Bucket único (usa prefijos). Agrego nombre de cuenta y de región para evitar nombres hardcodeados
+        bucket_name = f"transcripcion-con-resumen-backend-'{self.account}'-'{self.region}'"
         self.bucket = s3.Bucket(
             self,
             "BucketGeneral",
             bucket_name=bucket_name,
             cors=[
                 s3.CorsRule(
-                    allowed_methods=[s3.HttpMethods.GET, s3.HttpMethods.POST, s3.HttpMethods.PUT, s3.HttpMethods.DELETE, s3.HttpMethods.HEAD],
+                    allowed_methods=[
+                        s3.HttpMethods.GET,
+                        s3.HttpMethods.POST,
+                        s3.HttpMethods.PUT,
+                        s3.HttpMethods.DELETE,
+                        s3.HttpMethods.HEAD,
+                    ],
                     allowed_origins=["*"],
                     allowed_headers=["*"],
                     max_age=3000,
-                )],
+                )
+            ],
             removal_policy=RemovalPolicy.DESTROY,
-            auto_delete_objects=True,   # elimina los objetos antes de borrar el bucket
+            auto_delete_objects=True,  # elimina los objetos antes de borrar el bucket
+            lifecycle_rules=[
+                s3.LifecycleRule(
+                    expiration=core.Duration.days(
+                        dias_de_expiracion
+                    )
+                )
+            ],
         )
 
         # Prefijos (solo constantes para usar en filtros/keys)
@@ -78,11 +96,11 @@ class TranscripcionConResumenBackendStack(Stack):
             memory_size=512,
         )
 
-        # 3) Permisos de bucket
+        # 3 Permisos de bucket
         for fn in [self.fn_transcribir, self.fn_formatear, self.fn_resumir]:
             self.bucket.grant_read_write(fn)
 
-        # 4) Permisos específicos de servicio
+        # 4 Permisos específicos de servicio
         # Transcribe para la Lambda de transcribir
         self.fn_transcribir.add_to_role_policy(
             iam.PolicyStatement(
@@ -108,7 +126,7 @@ class TranscripcionConResumenBackendStack(Stack):
             )
         )
 
-        # 5) Notificaciones S3 → Lambdas (prefijos correctos)
+        # 5 Notificaciones S3 → Lambdas (prefijos correctos)
         # Cuando aparece un .json en transcripciones/ => formatear
         self.bucket.add_event_notification(
             s3.EventType.OBJECT_CREATED,
@@ -125,7 +143,7 @@ class TranscripcionConResumenBackendStack(Stack):
             ),
         )
 
-        # 6) API Gateway (solo para kick-off de transcripción)
+        # 6 API Gateway (solo para kick-off de transcripción)
         api = apigateway.RestApi(
             self,
             "TranscripcionApi",
@@ -134,7 +152,7 @@ class TranscripcionConResumenBackendStack(Stack):
         )
         transcribir_res = api.root.add_resource("transcribir")
 
-        #Método POST
+        # Método POST
         transcribir_res.add_method(
             "POST",
             apigateway.LambdaIntegration(self.fn_transcribir, proxy=True),
@@ -150,7 +168,7 @@ class TranscripcionConResumenBackendStack(Stack):
             ],
         )
 
-       # Método OPTIONS (preflight CORS)
+        # Método OPTIONS (preflight CORS)
         transcribir_res.add_method(
             "OPTIONS",
             apigateway.MockIntegration(
@@ -162,15 +180,11 @@ class TranscripcionConResumenBackendStack(Stack):
                             "method.response.header.Access-Control-Allow-Origin": "'*'",
                             "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,POST'",
                         },
-                        "responseTemplates": {
-                            "application/json": "{}"
-                        },
+                        "responseTemplates": {"application/json": "{}"},
                     }
                 ],
                 passthrough_behavior=apigateway.PassthroughBehavior.NEVER,
-                request_templates={
-                    "application/json": '{"statusCode": 200}'
-                },
+                request_templates={"application/json": '{"statusCode": 200}'},
             ),
             method_responses=[
                 {
@@ -181,5 +195,5 @@ class TranscripcionConResumenBackendStack(Stack):
                         "method.response.header.Access-Control-Allow-Methods": True,
                     },
                 }
-            ]
+            ],
         )
