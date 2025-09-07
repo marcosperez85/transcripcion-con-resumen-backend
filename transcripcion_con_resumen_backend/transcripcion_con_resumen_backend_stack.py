@@ -120,7 +120,11 @@ class TranscripcionConResumenBackendStack(Stack):
                     "bedrock:InvokeModel",
                     "bedrock:InvokeModelWithResponseStream",
                 ],
-                resources=["*"],
+                # Especifico sólo los modelos que realmente uso
+                resources=[
+                    f"arn:aws:bedrock:{self.region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
+                    f"arn:aws:bedrock:{self.region}::foundation-model/amazon.titan-text-premier-v1:0",          
+                ],
             )
         )
 
