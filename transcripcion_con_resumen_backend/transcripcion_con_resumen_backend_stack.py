@@ -7,6 +7,7 @@ from aws_cdk import (
     aws_apigateway as apigateway,
     aws_s3_notifications as s3n,
     RemovalPolicy,
+    CfnOutput,
 )
 from constructs import Construct
 
@@ -94,7 +95,11 @@ class TranscripcionConResumenBackendStack(Stack):
         self.fn_transcribir.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["s3:GetObject"],
-                resources=[f"{self.bucket.bucket_arn}/{self.PFX_AUDIOS}*"],
+                resources=[
+                    f"{self.bucket.bucket_arn}/{self.PFX_AUDIOS}*",
+                    f"{self.bucket.bucket_arn}/{self.PFX_TRANSCRIPCIONES_FMT}*",  # Para leer transcripciones formateadas
+                    f"{self.bucket.bucket_arn}/{self.PFX_RESUMENES}*",           # Para leer resúmenes
+                ],
             )
         )
         self.fn_transcribir.add_to_role_policy(
@@ -159,8 +164,7 @@ class TranscripcionConResumenBackendStack(Stack):
                 ],
                 # Especifico sólo los modelos que realmente uso
                 resources=[
-                    f"arn:aws:bedrock:{self.region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
-                    f"arn:aws:bedrock:{self.region}::foundation-model/amazon.titan-text-premier-v1:0",
+                    f"arn:aws:bedrock:{self.region}::foundation-model/amazon.titan-text-express-v1",
                 ],
             )
         )
@@ -236,3 +240,6 @@ class TranscripcionConResumenBackendStack(Stack):
                 }
             ],
         )
+
+        # Declaro outputs para el deploy
+        CfnOutput(self, "BackendBucketName", value=self.bucket.bucket_name)
