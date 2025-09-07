@@ -7,7 +7,6 @@ from aws_cdk import (
     aws_apigateway as apigateway,
     aws_s3_notifications as s3n,
     RemovalPolicy,
-    core,
 )
 from constructs import Construct
 
@@ -20,9 +19,7 @@ class TranscripcionConResumenBackendStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         # 1 Bucket único (usa prefijos). Agrego nombre de cuenta y de región para evitar nombres hardcodeados
-        bucket_name = (
-            f"transcripcion-con-resumen-backend-'{self.account}'-'{self.region}'"
-        )
+        bucket_name = f"transcripcion-con-resumen-backend-{self.account}-{self.region}"
         self.bucket = s3.Bucket(
             self,
             "BucketGeneral",
@@ -33,8 +30,6 @@ class TranscripcionConResumenBackendStack(Stack):
                         s3.HttpMethods.GET,
                         s3.HttpMethods.POST,
                         s3.HttpMethods.PUT,
-                        s3.HttpMethods.DELETE,
-                        s3.HttpMethods.HEAD,
                     ],
                     allowed_origins=["*"],
                     allowed_headers=["*"],
@@ -44,7 +39,7 @@ class TranscripcionConResumenBackendStack(Stack):
             removal_policy=RemovalPolicy.DESTROY,
             auto_delete_objects=True,  # elimina los objetos antes de borrar el bucket
             lifecycle_rules=[
-                s3.LifecycleRule(expiration=core.Duration.days(dias_de_expiracion))
+                s3.LifecycleRule(expiration=Duration.days(dias_de_expiracion))
             ],
         )
 
