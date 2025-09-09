@@ -50,7 +50,6 @@ class TranscripcionConResumenBackendStack(Stack):
         self.PFX_TRANSCRIPCIONES = "transcripciones/"
         self.PFX_TRANSCRIPCIONES_FMT = "transcripciones-formateadas/"
         self.PFX_RESUMENES = "resumenes/"
-        self.PFX_STATIC = "static/"
 
         # 2) Lambdas (guardar referencias)
         common_env = {"BUCKET": self.bucket.bucket_name}
