@@ -37,7 +37,13 @@ def lambda_handler(event, context):
     # Normalizamos body
     if 'body' in event:
         try:
-            body = json.loads(event['body']) if isinstance(event['body'], str) else event['body']
+            body = event['body']
+            if isinstance(body, str):
+                body = json.loads(body)
+
+            # Si después de cargar sigue siendo str, cargamos otra vez
+            if isinstance(body, str):
+                body = json.loads(body)
         except Exception as e:
             logger.error(f"Error parsing body: {str(e)}")
             return _resp(400, {"error": "Invalid body"})
@@ -45,6 +51,7 @@ def lambda_handler(event, context):
         body = event
 
     logger.info(f"Request body: {body}")
+    logger.info(f"Parsed body type: {type(body)}")
 
     # ---------------------------
     # RUTA 1: checkStatus
