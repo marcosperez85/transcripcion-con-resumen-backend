@@ -1,9 +1,11 @@
 from aws_cdk import (
+    Aws,
     Duration,
     Stack,
     aws_lambda as lambda_,
     aws_s3 as s3,
     aws_iam as iam,
+    aws_cognito as cognito,
     aws_apigateway as apigateway,
     aws_s3_notifications as s3n,
     RemovalPolicy,
@@ -19,6 +21,18 @@ class TranscripcionConResumenBackendStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
+        # Prefijos (solo constantes para usar en filtros/keys)
+        self.PFX_AUDIOS = "audios/"
+        self.PFX_TRANSCRIPCIONES = "transcripciones/"
+        self.PFX_TRANSCRIPCIONES_FMT = "transcripciones-formateadas/"
+        self.PFX_RESUMENES = "resumenes/"
+
+        frontend_origins = self.node.try_get_context("frontendOrigins") or [
+            "https://d11ahn26gyfe9q.cloudfront.net",
+            "http://localhost:5173",           # Vite por defecto
+            "http://localhost:3000"            # opcional si usás ese puerto
+        ]
+
         # 1 Bucket único (usa prefijos). Agrego nombre de cuenta y de región para evitar nombres hardcodeados
         bucket_name = f"transcripcion-con-resumen-backend-{self.account}-{self.region}"
         self.bucket = s3.Bucket(
@@ -29,12 +43,16 @@ class TranscripcionConResumenBackendStack(Stack):
                 s3.CorsRule(
                     allowed_methods=[
                         s3.HttpMethods.GET,
+                        s3.HttpMethods.HEAD,
                         s3.HttpMethods.POST,
                         s3.HttpMethods.PUT,
                     ],
+                    allowed_origins=frontend_origins,
+                    allowed_headers=["*", "authorization", "content-type", "x-amz-*"],
+                    exposed_headers=["etag", "x-amz-request-id", "x-amz-id-2"],
                     # Limito el origen permitido del CORS para que sólo mi CloudFront distribution pueda hacer API calls
-                    allowed_origins=["https://d1cssc0skay50s.cloudfront.net"],
-                    allowed_headers=["*"],
+                    # allowed_origins=["https://d11ahn26gyfe9q.cloudfront.net"],
+                    # allowed_headers=["*"],
                     max_age=3000,
                 )
             ],
@@ -45,11 +63,90 @@ class TranscripcionConResumenBackendStack(Stack):
             ],
         )
 
-        # Prefijos (solo constantes para usar en filtros/keys)
-        self.PFX_AUDIOS = "audios/"
-        self.PFX_TRANSCRIPCIONES = "transcripciones/"
-        self.PFX_TRANSCRIPCIONES_FMT = "transcripciones-formateadas/"
-        self.PFX_RESUMENES = "resumenes/"
+        # === Parametrización por contexto (cdk.json) ===
+        user_pool_id = self.node.try_get_context("userPoolId") or "us-east-1_PApw7t541"
+        user_pool_client_id = self.node.try_get_context("userPoolClientId") or "6evgd9kupcn26vc5nmtuajqrkm"
+        identity_pool_name = self.node.try_get_context("identityPoolName") or "TranscripcionConResumenIdPool"
+        # identity_pool_name = "TranscripcionConResumenIdPool"
+
+        provider_base = f"cognito-idp.{Aws.REGION}.amazonaws.com/{user_pool_id}"
+        # role_mapping_provider = f"{provider_base}:{user_pool_client_id}"
+
+        # === Identity Pool sin anónimos, enlazado al User Pool existente ===
+        id_pool = cognito.CfnIdentityPool(
+            self, "IdentityPool",
+            identity_pool_name=identity_pool_name,
+            allow_unauthenticated_identities=False,
+            cognito_identity_providers=[
+                cognito.CfnIdentityPool.CognitoIdentityProviderProperty(
+                    client_id=user_pool_client_id,
+                    provider_name=provider_base,
+                )
+            ],
+        )
+
+        # === Rol para usuarios autenticados del Identity Pool ===
+        auth_role = iam.Role(
+            self, "CognitoAuthenticatedRole",
+            assumed_by=iam.FederatedPrincipal(
+                "cognito-identity.amazonaws.com",
+                {
+                    "StringEquals": {
+                        "cognito-identity.amazonaws.com:aud": id_pool.ref
+                    },
+                    "ForAnyValue:StringLike": {
+                        "cognito-identity.amazonaws.com:amr": "authenticated"
+                    },
+                },
+                "sts:AssumeRoleWithWebIdentity",
+            ),
+            description="Role used by authenticated users from the Cognito Identity Pool",
+        )
+
+        # === POLICY 3A: aislamiento por usuario ===
+        # Sólo permite subir a 'audios/${identityId}/*'
+        auth_role.add_to_policy(
+            iam.PolicyStatement(
+                sid="UploadOnlyOwnPrefix",
+                actions=[
+                    "s3:PutObject",
+                    "s3:AbortMultipartUpload",
+                    "s3:ListMultipartUploadParts",
+                    "s3:ListBucketMultipartUploads",
+                ],
+                resources=[
+                    f"{self.bucket.bucket_arn}/{self.PFX_AUDIOS}${{cognito-identity.amazonaws.com:sub}}/*"
+                ],
+            )
+        )
+        # (Opcional) ListBucket limitado al propio prefijo
+        auth_role.add_to_policy(
+            iam.PolicyStatement(
+                sid="ListOnlyOwnPrefix",
+                actions=["s3:ListBucket"],
+                resources=[self.bucket.bucket_arn],
+                conditions={
+                    "StringLike": {
+                        "s3:prefix": [f"{self.PFX_AUDIOS}${{cognito-identity.amazonaws.com:sub}}/*"]
+                    }
+                },
+            )
+        )
+
+        # Adjuntar el rol de autenticados al Identity Pool con un mapeo por Token
+        cognito.CfnIdentityPoolRoleAttachment(
+            self, "IdentityPoolRoleAttachment",
+            identity_pool_id=id_pool.ref,
+            roles={"authenticated": auth_role.role_arn},
+            # Dejo comentado por ahora. Sólo habilitar si tuviera más de un identity provider
+            # role_mappings={
+            #     "UserPoolTokenMapping": cognito.CfnIdentityPoolRoleAttachment.RoleMappingProperty(
+            #         type="Token",
+            #         ambiguous_role_resolution="AuthenticatedRole",
+            #         identity_provider=role_mapping_provider,
+            #     )
+            # },
+        )
 
         # 2) Lambdas (guardar referencias)
         common_env = {"BUCKET": self.bucket.bucket_name}
@@ -217,7 +314,7 @@ class TranscripcionConResumenBackendStack(Stack):
                         "statusCode": "200",
                         "responseParameters": {
                             "method.response.header.Access-Control-Allow-Headers": "'Content-Type'",
-                            "method.response.header.Access-Control-Allow-Origin": "'https://d1cssc0skay50s.cloudfront.net'",
+                            "method.response.header.Access-Control-Allow-Origin": "'https://d11ahn26gyfe9q.cloudfront.net'",
                             "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,POST'",
                         },
                         "responseTemplates": {"application/json": "{}"},
@@ -238,5 +335,8 @@ class TranscripcionConResumenBackendStack(Stack):
             ],
         )
 
-        # Declaro outputs para el deploy
+        # Declaro outputs para el deploy y para cablear el frontend
         CfnOutput(self, "BackendBucketName", value=self.bucket.bucket_name)
+        CfnOutput(self, "IdentityPoolId", value=id_pool.ref)
+        CfnOutput(self, "IdentityProviderName", value=provider_base)
+        CfnOutput(self, "AuthenticatedRoleArn", value=auth_role.role_arn)
