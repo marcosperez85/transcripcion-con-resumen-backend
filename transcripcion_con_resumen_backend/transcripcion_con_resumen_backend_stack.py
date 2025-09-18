@@ -27,6 +27,7 @@ class TranscripcionConResumenBackendStack(Stack):
         self.PFX_TRANSCRIPCIONES_FMT = "transcripciones-formateadas/"
         self.PFX_RESUMENES = "resumenes/"
 
+        # Limito el origen permitido del CORS para que sólo mi CloudFront distribution (y mi entorno DEV) pueda hacer API calls
         frontend_origins = self.node.try_get_context("frontendOrigins") or [
             "https://d11ahn26gyfe9q.cloudfront.net",
             "http://localhost:5173",           # Vite por defecto
@@ -50,9 +51,6 @@ class TranscripcionConResumenBackendStack(Stack):
                     allowed_origins=frontend_origins,
                     allowed_headers=["*", "authorization", "content-type", "x-amz-*"],
                     exposed_headers=["etag", "x-amz-request-id", "x-amz-id-2"],
-                    # Limito el origen permitido del CORS para que sólo mi CloudFront distribution pueda hacer API calls
-                    # allowed_origins=["https://d11ahn26gyfe9q.cloudfront.net"],
-                    # allowed_headers=["*"],
                     max_age=3000,
                 )
             ],
@@ -64,23 +62,61 @@ class TranscripcionConResumenBackendStack(Stack):
         )
 
         # === Parametrización por contexto (cdk.json) ===
-        user_pool_id = self.node.try_get_context("userPoolId") or "us-east-1_PApw7t541"
-        user_pool_client_id = self.node.try_get_context("userPoolClientId") or "6evgd9kupcn26vc5nmtuajqrkm"
-        identity_pool_name = self.node.try_get_context("identityPoolName") or "TranscripcionConResumenIdPool"
-        # identity_pool_name = "TranscripcionConResumenIdPool"
+        # Create new User Pool
+        user_pool = cognito.UserPool(
+            self, "UserPool",
+            # auto_verify=cognito.AutoVerifiedAttrs.EMAIL,
+            # sign_in_aliases=[cognito.SignInAliases.EMAIL],
+            self_sign_up_enabled=True,
+            user_verification=cognito.UserVerificationConfig(
+                email_subject="Verify your email for Transcriptor",
+                email_body="Hello! Your verification code is {####}",
+                email_style=cognito.VerificationEmailStyle.CODE,
+            ),
+            password_policy=cognito.PasswordPolicy(
+                min_length=8,
+                require_lowercase=True,
+                require_uppercase=True,
+                require_digits=True,
+                require_symbols=False,
+            ),
+            email=cognito.UserPoolEmail.with_cognito(),
+        )
 
-        provider_base = f"cognito-idp.{Aws.REGION}.amazonaws.com/{user_pool_id}"
-        # role_mapping_provider = f"{provider_base}:{user_pool_client_id}"
+        user_pool_client = cognito.UserPoolClient(
+            self, "UserPoolClient",
+            user_pool=user_pool,
+            auth_flows=cognito.AuthFlow(
+                user_password=True,
+                user_srp=True,
+                admin_user_password=True,
+            ),
+            generate_secret=False,
+            prevent_user_existence_errors=True,
+        )
 
-        # === Identity Pool sin anónimos, enlazado al User Pool existente ===
+        user_pool_domain = cognito.UserPoolDomain(
+            self, "UserPoolDomain",
+            user_pool=user_pool,
+            cognito_domain=cognito.CognitoDomainOptions(
+                domain_prefix=f"transcripcion-app-{self.account}"  # This ensures uniqueness
+            )
+        )
+
+        # Use the NEW User Pool's IDs
+        provider_base = f"cognito-idp.{Aws.REGION}.amazonaws.com/{user_pool.user_pool_id}"
+
+        # Replace the hardcoded identity pool name with:
+        identity_pool_name = self.node.try_get_context("identityPoolName") or f"TranscripcionConResumenIdPool-{self.account}"
+
         id_pool = cognito.CfnIdentityPool(
             self, "IdentityPool",
             identity_pool_name=identity_pool_name,
             allow_unauthenticated_identities=False,
             cognito_identity_providers=[
                 cognito.CfnIdentityPool.CognitoIdentityProviderProperty(
-                    client_id=user_pool_client_id,
-                    provider_name=provider_base,
+                    client_id=user_pool_client.user_pool_client_id,  # Use new client
+                    provider_name=provider_base,  # Use new pool
                 )
             ],
         )
@@ -339,4 +375,10 @@ class TranscripcionConResumenBackendStack(Stack):
         CfnOutput(self, "BackendBucketName", value=self.bucket.bucket_name)
         CfnOutput(self, "IdentityPoolId", value=id_pool.ref)
         CfnOutput(self, "IdentityProviderName", value=provider_base)
+        CfnOutput(self, "CognitoDomainPrefix", value=user_pool_domain.domain_name)
         CfnOutput(self, "AuthenticatedRoleArn", value=auth_role.role_arn)
+
+        # Add outputs for the new IDs
+        CfnOutput(self, "NewUserPoolId", value=user_pool.user_pool_id)
+        CfnOutput(self, "NewUserPoolClientId", value=user_pool_client.user_pool_client_id)
+        
