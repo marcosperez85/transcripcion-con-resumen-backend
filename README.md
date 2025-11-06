@@ -6,6 +6,13 @@
 
 Este proyecto implementa un backend serverless en AWS para un sistema de transcripción y resumen de audio utilizando AWS CDK con Python.
 
+A diferencia de otros servicios de transcripción y resúmenes, esta aplicación está enfocada en la privacidad de la información de forma que el usuario final tenga control sobre los audios que sube a la plataforma, con la seguridad que no van a ser usados por terceros y con la posibilidad de eliminarlos en cualquier momento.
+
+<p align="center">
+  <em>Arquitectura de servicios en AWS</em>
+  <img src="./assets/01_Arquitectura.jpeg" alt="Arquitectura de servicios" width="80%"/>
+</p>
+
 ## Descripción del Proyecto
 
 El sistema está compuesto por dos funciones Lambda principales:
@@ -88,6 +95,13 @@ transcripcion-con-resumen-backend/
 # Transcription with Summary - Backend (Englis version)
 
 This project implements a serverless backend on AWS for an audio transcription and summarization system using AWS CDK with Python.
+
+Unlike other transcription and summarization services, this application is focused on information privacy, ensuring that the end user maintains full control over the audio files they upload to the platform, with the guarantee that they will not be used by third parties and can be deleted at any time.
+
+<p align="center">
+  <em>AWS Services Architecture</em>
+  <img src="./assets/01_Arquitectura.jpeg" alt="AWS Services Architecture" width="80%"/>
+</p>
 
 ## Project Description
 
