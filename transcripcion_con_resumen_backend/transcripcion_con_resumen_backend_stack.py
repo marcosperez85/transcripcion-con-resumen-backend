@@ -92,6 +92,36 @@ class TranscripcionConResumenBackendStack(Stack):
                 user_password=True,
                 user_srp=True,
             ),
+
+                # Configuración de URLs de callback y logout
+            o_auth=cognito.OAuthSettings(
+                flows=cognito.OAuthFlows(
+                    authorization_code_grant=True,
+                    implicit_code_grant=True,  # Para SPAs
+                ),
+                scopes=[
+                    cognito.OAuthScope.EMAIL,
+                    cognito.OAuthScope.OPENID,
+                    cognito.OAuthScope.PROFILE,
+                ],
+                callback_urls=[
+                    "https://d11ahn26gyfe9q.cloudfront.net/callback",
+                    "https://d11ahn26gyfe9q.cloudfront.net/",
+                    "http://localhost:5173/callback",  # Para desarrollo
+                    "http://localhost:5173/",
+                    "http://localhost:3000/callback",
+                    "http://localhost:3000/",
+                ],
+                logout_urls=[
+                    "https://d11ahn26gyfe9q.cloudfront.net/",
+                    "http://localhost:5173/",
+                    "http://localhost:3000/",
+                ],
+            ),
+            # Habilitar páginas hospedadas de Cognito
+            supported_identity_providers=[
+                cognito.UserPoolClientIdentityProvider.COGNITO,
+            ],
         )
 
         user_pool_id = user_pool.user_pool_id
@@ -370,3 +400,4 @@ class TranscripcionConResumenBackendStack(Stack):
         CfnOutput(self, "AuthenticatedRoleArn", value=auth_role.role_arn)
         CfnOutput(self, "UserPoolId", value=user_pool.user_pool_id)
         CfnOutput(self, "UserPoolClientId", value=user_pool_client.user_pool_client_id)
+        
