@@ -15,8 +15,8 @@
     ]
   },
   "context": {
-    "userPoolId": "us-east-1_PApw7t541",
-    "userPoolClientId": "6evgd9kupcn26vc5nmtuajqrkm",
+    "userPoolId": "us-east-1_cH9mKVza7",
+    "userPoolClientId": "7mamskis0o6je28qfvtr4tvftd",
     "identityPoolName": "TranscripcionConResumenIdPool",
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
     "@aws-cdk/core:checkSecretUsage": true,

@@ -64,10 +64,38 @@ class TranscripcionConResumenBackendStack(Stack):
         )
 
         # === Parametrización por contexto (cdk.json) ===
-        user_pool_id = self.node.try_get_context("userPoolId") or "us-east-1_PApw7t541"
-        user_pool_client_id = self.node.try_get_context("userPoolClientId") or "6evgd9kupcn26vc5nmtuajqrkm"
+        # user_pool_id = self.node.try_get_context("userPoolId") or "us-east-1_PApw7t541"
+        # user_pool_client_id = self.node.try_get_context("userPoolClientId") or "6evgd9kupcn26vc5nmtuajqrkm"
         identity_pool_name = self.node.try_get_context("identityPoolName") or "TranscripcionConResumenIdPool"
-        # identity_pool_name = "TranscripcionConResumenIdPool"
+        
+        # User Pool y User Pool Client
+        user_pool = cognito.UserPool(
+            self, "TranscripcionUserPool",
+            user_pool_name="transcripcion-con-resumen-user-pool",
+            sign_in_aliases=cognito.SignInAliases(email=True),
+            auto_verify=cognito.AutoVerifiedAttrs(email=True),
+            password_policy=cognito.PasswordPolicy(
+                min_length=8,
+                require_lowercase=True,
+                require_uppercase=True,
+                require_digits=True,
+                require_symbols=False,
+            ),
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
+        user_pool_client = cognito.UserPoolClient(
+            self, "TranscripcionUserPoolClient",
+            user_pool=user_pool,
+            generate_secret=False,  # Para aplicaciones web públicas
+            auth_flows=cognito.AuthFlow(
+                user_password=True,
+                user_srp=True,
+            ),
+        )
+
+        user_pool_id = user_pool.user_pool_id
+        user_pool_client_id = user_pool_client.user_pool_client_id
 
         provider_base = f"cognito-idp.{Aws.REGION}.amazonaws.com/{user_pool_id}"
         # role_mapping_provider = f"{provider_base}:{user_pool_client_id}"
@@ -340,3 +368,5 @@ class TranscripcionConResumenBackendStack(Stack):
         CfnOutput(self, "IdentityPoolId", value=id_pool.ref)
         CfnOutput(self, "IdentityProviderName", value=provider_base)
         CfnOutput(self, "AuthenticatedRoleArn", value=auth_role.role_arn)
+        CfnOutput(self, "UserPoolId", value=user_pool.user_pool_id)
+        CfnOutput(self, "UserPoolClientId", value=user_pool_client.user_pool_client_id)
