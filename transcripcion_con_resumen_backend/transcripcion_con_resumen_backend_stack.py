@@ -64,8 +64,6 @@ class TranscripcionConResumenBackendStack(Stack):
         )
 
         # === Parametrización por contexto (cdk.json) ===
-        # user_pool_id = self.node.try_get_context("userPoolId") or "us-east-1_PApw7t541"
-        # user_pool_client_id = self.node.try_get_context("userPoolClientId") or "6evgd9kupcn26vc5nmtuajqrkm"
         identity_pool_name = self.node.try_get_context("identityPoolName") or "TranscripcionConResumenIdPool"
         
         # User Pool y User Pool Client
@@ -97,25 +95,20 @@ class TranscripcionConResumenBackendStack(Stack):
             o_auth=cognito.OAuthSettings(
                 flows=cognito.OAuthFlows(
                     authorization_code_grant=True,
-                    implicit_code_grant=True,  # Para SPAs
+                    # implicit_code_grant=True
                 ),
                 scopes=[
                     cognito.OAuthScope.EMAIL,
                     cognito.OAuthScope.OPENID,
-                    cognito.OAuthScope.PROFILE,
+                    # cognito.OAuthScope.PROFILE,
                 ],
                 callback_urls=[
-                    "https://d11ahn26gyfe9q.cloudfront.net/callback",
-                    "https://d11ahn26gyfe9q.cloudfront.net/",
-                    "http://localhost:5173/callback",  # Para desarrollo
-                    "http://localhost:5173/",
-                    "http://localhost:3000/callback",
-                    "http://localhost:3000/",
+                    "https://d11ahn26gyfe9q.cloudfront.net/pages/callback.html",
+                    "http://localhost:5173/pages/callback.html"                   
                 ],
                 logout_urls=[
                     "https://d11ahn26gyfe9q.cloudfront.net/",
-                    "http://localhost:5173/",
-                    "http://localhost:3000/",
+                    "http://localhost:5173/"
                 ],
             ),
             # Habilitar páginas hospedadas de Cognito
@@ -123,6 +116,17 @@ class TranscripcionConResumenBackendStack(Stack):
                 cognito.UserPoolClientIdentityProvider.COGNITO,
             ],
         )
+
+        # Dominio usado por el frontend (exportado vía CfnOutput)
+        user_pool_domain = cognito.UserPoolDomain(
+            self,
+            "TranscripcionUserPoolDomain",
+            user_pool=user_pool,
+            cognito_domain=cognito.CognitoDomainOptions(
+                domain_prefix=f"transcripcion-{self.account}"
+            ),
+        )
+
 
         user_pool_id = user_pool.user_pool_id
         user_pool_client_id = user_pool_client.user_pool_client_id
@@ -400,4 +404,5 @@ class TranscripcionConResumenBackendStack(Stack):
         CfnOutput(self, "AuthenticatedRoleArn", value=auth_role.role_arn)
         CfnOutput(self, "UserPoolId", value=user_pool.user_pool_id)
         CfnOutput(self, "UserPoolClientId", value=user_pool_client.user_pool_client_id)
+        CfnOutput(self, "UserPoolDomain", value=f"{user_pool_domain.domain_name}.auth.{self.region}.amazoncognito.com")
         
