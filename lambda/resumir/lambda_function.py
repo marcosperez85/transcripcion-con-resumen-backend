@@ -2,81 +2,138 @@ import json
 import boto3
 import os
 import logging
-import os
+from botocore.exceptions import ClientError
 
-# Configuración del logger para CloudWatch
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Nombre del bucket de entrada y salida
-output_bucket = os.environ['BUCKET']
+OUTPUT_BUCKET = os.environ["BUCKET"]
+REGION = os.environ["AWS_REGION"]
 
-# Crear clientes de AWS
-bedrock = boto3.client('bedrock-runtime', region_name=os.environ['AWS_REGION'])
-s3 = boto3.client('s3')
+s3 = boto3.client("s3")
+bedrock = boto3.client(
+    "bedrock-runtime",
+    region_name=REGION
+)
+
+MODEL_ID = "meta.llama3-8b-instruct-v1:0"
+
 
 def lambda_handler(event, context):
+    key = None
+
     try:
-        # Extraer bucket y key del evento
-        bucket = event['Records'][0]['s3']['bucket']['name']
-        key = event['Records'][0]['s3']['object']['key']
-        
-        logger.info(f"Archivo recibido: s3://{bucket}/{key}")
+        # ---- Input desde S3 ----
+        bucket = event["Records"][0]["s3"]["bucket"]["name"]
+        key = event["Records"][0]["s3"]["object"]["key"]
 
-        # Leer archivo desde S3
+        logger.info(f"Procesando archivo: s3://{bucket}/{key}")
+
         response = s3.get_object(Bucket=bucket, Key=key)
-        text = response['Body'].read().decode('utf-8')
+        text = response["Body"].read().decode("utf-8")
 
-        # Preparar el prompt de resumen
-        summary_prompt = f"Summarize the following text:\n{text}. Create a bullet list with the main topics. Keep source original language"
+        # ---- Prompt recomendado ----
+        prompt = f"""
+            You are a professional summarization assistant.
 
-        # Preparar el cuerpo de la solicitud para Bedrock
-        kwargs = {
-            "modelId": "amazon.titan-text-express-v1",
-            "contentType": "application/json",
-            "accept": "*/*",
-            "body": json.dumps({
-                "inputText": summary_prompt,
-                "textGenerationConfig": {
-                    "maxTokenCount": 1024,
-                    "temperature": 0.7,
-                    "topP": 0.9,
-                    "stopSequences": []
-                }
-            })
+            TASK:
+            Generate a clean, well-structured summary.
+
+            REQUIREMENTS:
+            - Output ONLY the summary.
+            - Do NOT repeat sentences from the original text.
+            - Do NOT include separators, tables, or special characters.
+            - Use a concise bullet list.
+            - Preserve the original language.
+
+            TEXT START
+            {text}
+            TEXT END
+
+            SUMMARY:
+            """.strip()
+
+        body = {
+            "prompt": prompt,
+            "max_gen_len": 1024,
+            "temperature": 0.3,
+            "top_p": 0.9
         }
 
-        # Llamar al modelo de Bedrock
-        bedrock_response = bedrock.invoke_model(**kwargs)
-        response_body = json.loads(bedrock_response['body'].read())
-        summary = response_body['results'][0]['outputText']
-
-        # Extraer solo el nombre del archivo original
-        filename = os.path.basename(key)
-
-        # Cambiar nombre del archivo para el resumen
-        summary_filename = filename.replace('.txt', '_summary.txt')
-
-        # Guardar el resumen bajo la carpeta 'resumenes/' sin subcarpetas intermedias
-        output_key = f"resumenes/{summary_filename}"
-
-        # Subir el resumen a S3
-        s3.put_object(
-            Bucket=output_bucket,
-            Key=output_key,
-            Body=summary
+        # ---- Invocación a Bedrock ----
+        response = bedrock.invoke_model(
+            modelId=MODEL_ID,
+            contentType="application/json",
+            accept="application/json",
+            body=json.dumps(body)
         )
 
-        logger.info(f"Resumen guardado en: s3://{output_bucket}/{output_key}")
+        response_body = json.loads(response["body"].read())
+
+        # ---- Parsing correcto ----
+        summary = response_body["generation"]
+
+        # ---- Output ----
+        filename = os.path.basename(key)
+        summary_key = f"resumenes/{filename.replace('.txt', '_summary.txt')}"
+
+        s3.put_object(
+            Bucket=OUTPUT_BUCKET,
+            Key=summary_key,
+            Body=summary.encode("utf-8")
+        )
+
+        logger.info(f"Resumen generado: s3://{OUTPUT_BUCKET}/{summary_key}")
 
         return {
-            'statusCode': 200,
-            'body': json.dumps(f'Summary generated: {output_key}')
+            "status": "COMPLETED",
+            "output": summary_key
         }
 
+    # ---- Manejo explícito de errores Bedrock ----
+    except ClientError as e:
+        error_code = e.response["Error"]["Code"]
+
+        logger.error(f"Error Bedrock: {error_code} - {str(e)}")
+
+        error_payload = {
+            "status": "FAILED",
+            "error": "BEDROCK_MODEL_ERROR",
+            "detail": error_code
+        }
+
+        _write_failed_status(key, error_payload)
+        return error_payload
+
+    # ---- Error genérico ----
     except Exception as e:
-        logger.error(f"Error: {str(e)}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps(f"Error processing file: {str(e)}")
+        logger.exception("Error inesperado en Lambda")
+
+        error_payload = {
+            "status": "FAILED",
+            "error": "UNEXPECTED_ERROR",
+            "detail": str(e)
         }
+
+        _write_failed_status(key, error_payload)
+        return error_payload
+
+
+def _write_failed_status(input_key, payload):
+    """
+    Escribe un archivo FAILED para que el frontend
+    pueda cortar el polling inmediatamente.
+    """
+    if not input_key:
+        return
+
+    filename = os.path.basename(input_key)
+    error_key = f"resumenes/{filename}_FAILED.json"
+
+    s3.put_object(
+        Bucket=OUTPUT_BUCKET,
+        Key=error_key,
+        Body=json.dumps(payload).encode("utf-8")
+    )
+
+    logger.info(f"Estado FAILED escrito en s3://{OUTPUT_BUCKET}/{error_key}")
