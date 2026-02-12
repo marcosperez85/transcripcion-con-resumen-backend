@@ -16,7 +16,7 @@ bedrock = boto3.client(
     region_name=REGION
 )
 
-MODEL_ID = "meta.llama3-8b-instruct-v1:0"
+MODEL_ID = "meta.llama3-70b-instruct-v1:0"
 
 
 def lambda_handler(event, context):
@@ -34,24 +34,23 @@ def lambda_handler(event, context):
 
         # ---- Prompt recomendado ----
         prompt = f"""
-            You are a professional summarization assistant.
+You are a professional summarization assistant.
 
-            TASK:
-            Generate a clean, well-structured summary.
-
-            REQUIREMENTS:
-            - Output ONLY the summary.
-            - Do NOT repeat sentences from the original text.
-            - Do NOT include separators, tables, or special characters.
-            - Use a concise bullet list.
-            - Preserve the original language.
-
-            TEXT START
-            {text}
-            TEXT END
-
-            SUMMARY:
-            """.strip()
+TASK:
+Generate a clean, well-structured summary from this transcription
+            
+REQUIREMENTS:
+- Output ONLY the summary.
+- Do NOT repeat sentences from the original text.
+- Do NOT include separators, tables, or special characters.
+- Use a concise bullet list.
+- Preserve the original language.
+- Do NOT add any additional comments
+            
+TEXT START
+{text}
+TEXT END
+""".strip()
 
         body = {
             "prompt": prompt,
