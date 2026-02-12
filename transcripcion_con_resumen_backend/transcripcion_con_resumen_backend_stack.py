@@ -320,7 +320,7 @@ class TranscripcionConResumenBackendStack(Stack):
                 ],
                 # Especifico sólo los modelos que realmente uso
                 resources=[
-                    f"arn:aws:bedrock:{self.region}::foundation-model/meta.llama3-8b-instruct-v1:0",
+                    f"arn:aws:bedrock:{self.region}::foundation-model/meta.llama3-70b-instruct-v1:0",
                 ],
             )
         )
