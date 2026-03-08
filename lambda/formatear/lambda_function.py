@@ -1,3 +1,4 @@
+from datetime import datetime
 import boto3
 import json
 import logging
@@ -8,6 +9,9 @@ logger.setLevel(logging.INFO)
 
 s3_client = boto3.client('s3')
 output_bucket = os.environ['BUCKET']
+
+dynamodb = boto3.resource("dynamodb")
+usage_table = dynamodb.Table(os.environ["USAGE_TABLE"])
 
 def lambda_handler(event, context):
     # Verifica que el evento contiene los datos correctamente
@@ -27,6 +31,19 @@ def lambda_handler(event, context):
         transcript_data = json.loads(response['Body'].read().decode('utf-8'))
 
         items = transcript_data['results']['items']
+        # calcular duración del audio
+        duration_seconds = 0
+
+        if items:
+            for item in reversed(items):
+                if 'end_time' in item:
+                    duration_seconds = float(item['end_time'])
+                    break
+
+        for item in reversed(items):
+            if 'end_time' in item:
+                duration_seconds = float(item['end_time'])
+                break
         speaker_segments = transcript_data['results'].get('speaker_labels', {}).get('segments', [])
 
         speaker_map = {}
@@ -53,6 +70,9 @@ def lambda_handler(event, context):
 
         # Guardar archivo .txt
         filename = os.path.basename(key).replace(".json", ".txt")
+        job_name = filename.replace(".txt", "")
+        user_id = job_name.split("-")[0]
+
         txt_key = f"transcripciones-formateadas/{filename}"
         s3_client.put_object(
             Bucket=bucket,
@@ -62,6 +82,24 @@ def lambda_handler(event, context):
         )
 
         logger.info(f"Archivo TXT guardado en: s3://{bucket}/{txt_key}")
+
+        usage_table.update_item(
+            Key={"userId": user_id},
+            UpdateExpression="""
+                SET totalSeconds = if_not_exists(totalSeconds, :zero) + :delta,
+                    limitSeconds = if_not_exists(limitSeconds, :limit),
+                    updatedAt = :now
+            """,
+            ConditionExpression="attribute_not_exists(totalSeconds) OR totalSeconds < :limit",
+            ExpressionAttributeValues={
+                ":delta": duration_seconds,
+                ":zero": 0,
+                ":limit": 1800,
+                ":now": datetime.utcnow().isoformat()
+            }
+        )
+
+        logger.info(f"Duración {duration_seconds}s agregada al usuario {user_id}")
 
     except Exception as e:
         logger.error(f"Error al procesar transcripción: {str(e)}")
