@@ -3,6 +3,8 @@ import uuid
 import logging
 import json
 import os
+import jwt
+from datetime import datetime
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
@@ -11,6 +13,8 @@ logger.setLevel(logging.INFO)
 transcribe_client = boto3.client('transcribe')
 s3_client = boto3.client('s3')
 output_bucket = os.environ['BUCKET']
+dynamodb = boto3.resource("dynamodb")
+usage_table = dynamodb.Table(os.environ["USAGE_TABLE"])
 
 def _resp(status_code, payload_dict):
     return {
@@ -24,12 +28,29 @@ def _resp(status_code, payload_dict):
     }
 
 def _object_exists(bucket, key):
+
     try:
         s3_client.head_object(Bucket=bucket, Key=key)
         return True
     except ClientError as e:
         # Si no existe, devolvemos False; para otros errores, también False
         return False
+    
+def get_user_sub(event):
+    auth = event["headers"].get("authorization") or event["headers"].get("Authorization")
+    token = auth.split(" ")[1]
+
+    decoded = jwt.decode(token, options={"verify_signature": False})
+    return decoded["sub"]
+    
+def check_limit(user_id):
+    resp = usage_table.get_item(Key={"userId": user_id})
+    if "Item" not in resp:
+        return False, 0, 1800
+
+    item = resp["Item"]
+    exceeded = item.get("totalSeconds", 0) >= item.get("limitSeconds", 1800)
+    return exceeded, item.get("totalSeconds", 0), item.get("limitSeconds", 1800)
 
 def lambda_handler(event, context):
     logger.info(f"Received event: {json.dumps(event)}")
@@ -124,8 +145,33 @@ def lambda_handler(event, context):
     # RUTA 3: iniciar transcripción (comportamiento original)
     # ---------------------------
     try:
-        bucketName = body['s3']['bucketName']
+        user_id = get_user_sub(event)
+        exceeded, used, limit = check_limit(user_id)
+
+        if exceeded:
+            return _resp(403, {
+                "error": "Límite de uso alcanzado",
+                "usedSeconds": used,
+                "limitSeconds": limit
+            })
+        
+        # bucketName = body['s3']['bucketName']
+        bucketName = output_bucket
         key = body['s3']['key']
+
+        # Verificar tamaño del archivo antes de procesar
+        obj = s3_client.head_object(Bucket=bucketName, Key=key)
+        size_bytes = obj["ContentLength"]
+
+        size_mb = size_bytes / (1024 * 1024)
+        MAX_AUDIO_MB = 30
+
+        if size_mb > MAX_AUDIO_MB:
+            return _resp(400, {
+                "error": "Audio demasiado largo para usuarios beta",
+                "maxMinutes": 30
+            })
+
         languageCode = body['transcribe']['languageCode']
         maxSpeakers = body['transcribe']['maxSpeakers']
 
@@ -133,7 +179,8 @@ def lambda_handler(event, context):
             logger.warning(f"Ignorando archivo no válido: {key}")
             return _resp(400, {"error": "Clave S3 inválida"})
 
-        job_name = f"transcription-job-{uuid.uuid4()}"
+        job_name = f"{user_id}-{uuid.uuid4()}"
+        # job_name = f"transcription-job-{uuid.uuid4()}"
         media_uri = f"s3://{bucketName}/{key}"
         output_key = f"transcripciones/{job_name}.json"
 
