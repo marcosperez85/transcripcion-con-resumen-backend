@@ -8,13 +8,14 @@ from aws_cdk import (
     aws_cognito as cognito,
     aws_apigateway as apigateway,
     aws_s3_notifications as s3n,
+    aws_dynamodb as dynamodb,
     RemovalPolicy,
     CfnOutput,
 )
 from constructs import Construct
 
 # Días en los que se borran automáticamente los objetos alojados en el bucket de backend
-dias_de_expiracion = 3
+dias_de_expiracion = 1
 
 
 class TranscripcionConResumenBackendStack(Stack):
@@ -210,8 +211,23 @@ class TranscripcionConResumenBackendStack(Stack):
             # },
         )
 
+        # Tabla DynamoDB para registrar uso de audio por usuario
+        self.usage_table = dynamodb.Table(
+            self,
+            "UserUsageTable",
+            partition_key=dynamodb.Attribute(
+                name="userId",
+                type=dynamodb.AttributeType.STRING,
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
         # 2) Lambdas (guardar referencias)
-        common_env = {"BUCKET": self.bucket.bucket_name}
+        common_env = {
+            "BUCKET": self.bucket.bucket_name,
+            "USAGE_TABLE": self.usage_table.table_name
+        }
 
         self.fn_transcribir = lambda_.Function(
             self,
@@ -224,6 +240,9 @@ class TranscripcionConResumenBackendStack(Stack):
             timeout=Duration.minutes(5),
             memory_size=512,
         )
+
+        # Permisos para acceder a DynamoDB
+        self.usage_table.grant_read_write_data(self.fn_transcribir)
 
         self.fn_formatear = lambda_.Function(
             self,
