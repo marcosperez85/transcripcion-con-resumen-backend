@@ -364,56 +364,55 @@ class TranscripcionConResumenBackendStack(Stack):
         # 6 API Gateway (solo para kick-off de transcripción)
         api = apigateway.RestApi(
             self,
+            
             "TranscripcionApi",
             rest_api_name="Transcripcion API",
             deploy_options=apigateway.StageOptions(stage_name="prod"),
+            
+            # Habilitar CORS a nivel de la API para que se aplique a todas las respuestas, incluso errores
+            default_cors_preflight_options=apigateway.CorsOptions(
+                allow_origins=frontend_origins,
+                allow_methods=["POST", "OPTIONS"],
+                allow_headers=["Content-Type", "Authorization"],
+                max_age=Duration.hours(1)
+            )
         )
         transcribir_res = api.root.add_resource("transcribir")
+        
+        # Añadir autorizador para el método POST
+        authorizer = apigateway.CognitoUserPoolsAuthorizer(
+            self,
+            "TranscripcionAuthorizer",
+            cognito_user_pools=[user_pool],
+            identity_source="method.request.header.Authorization"
+        )
 
         # Método POST
         transcribir_res.add_method(
             "POST",
             apigateway.LambdaIntegration(self.fn_transcribir, proxy=True),
-            method_responses=[
-                apigateway.MethodResponse(
-                    status_code="200",
-                    response_parameters={
-                        "method.response.header.Access-Control-Allow-Origin": True,
-                        "method.response.header.Access-Control-Allow-Headers": True,
-                        "method.response.header.Access-Control-Allow-Methods": True,
-                    },
-                ),
-            ],
+            authorizer=authorizer,
+            authorization_type=apigateway.AuthorizationType.COGNITO
         )
 
-        # Método OPTIONS (preflight CORS)
-        transcribir_res.add_method(
-            "OPTIONS",
-            apigateway.MockIntegration(
-                integration_responses=[
-                    {
-                        "statusCode": "200",
-                        "responseParameters": {
-                            "method.response.header.Access-Control-Allow-Headers": "'Content-Type'",
-                            "method.response.header.Access-Control-Allow-Origin": "'https://d11ahn26gyfe9q.cloudfront.net'",
-                            "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,POST'",
-                        },
-                        "responseTemplates": {"application/json": "{}"},
-                    }
-                ],
-                passthrough_behavior=apigateway.PassthroughBehavior.NEVER,
-                request_templates={"application/json": '{"statusCode": 200}'},
-            ),
-            method_responses=[
-                {
-                    "statusCode": "200",
-                    "responseParameters": {
-                        "method.response.header.Access-Control-Allow-Headers": True,
-                        "method.response.header.Access-Control-Allow-Origin": True,
-                        "method.response.header.Access-Control-Allow-Methods": True,
-                    },
-                }
-            ],
+        api.add_gateway_response(
+            "Default4xx",
+            type=apigateway.ResponseType.DEFAULT_4_XX,
+            response_headers={
+                "Access-Control-Allow-Origin": "'*'",
+                "Access-Control-Allow-Headers": "'*'",
+                "Access-Control-Allow-Methods": "'*'"
+            },
+        )
+
+        api.add_gateway_response(
+            "Default5xx",
+            type=apigateway.ResponseType.DEFAULT_5_XX,
+            response_headers={
+                "Access-Control-Allow-Origin": "'*'",
+                "Access-Control-Allow-Headers": "'*'",
+                "Access-Control-Allow-Methods": "'*'"
+            },
         )
 
         # Declaro outputs para el deploy y para cablear el frontend
