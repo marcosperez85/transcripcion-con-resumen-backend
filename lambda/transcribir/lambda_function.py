@@ -3,206 +3,247 @@ import uuid
 import logging
 import json
 import os
-import jwt
-from datetime import datetime
+import base64
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-transcribe_client = boto3.client('transcribe')
-s3_client = boto3.client('s3')
-output_bucket = os.environ['BUCKET']
+transcribe_client = boto3.client("transcribe")
+s3_client = boto3.client("s3")
+
+output_bucket = os.environ["BUCKET"]
+
 dynamodb = boto3.resource("dynamodb")
 usage_table = dynamodb.Table(os.environ["USAGE_TABLE"])
 
-def _resp(status_code, payload_dict):
+
+# -----------------------------------------------------
+# Helpers
+# -----------------------------------------------------
+
+def response(code, payload):
     return {
-        "statusCode": status_code,
+        "statusCode": code,
         "headers": {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type",
-            "Access-Control-Allow-Methods": "OPTIONS,POST",
+            "Access-Control-Allow-Origin": "https://d11ahn26gyfe9q.cloudfront.net",
+            "Access-Control-Allow-Headers": "Content-Type,Authorization",
+            "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
         },
-        "body": json.dumps(payload_dict),
+        "body": json.dumps(payload),
     }
 
-def _object_exists(bucket, key):
 
-    try:
-        s3_client.head_object(Bucket=bucket, Key=key)
-        return True
-    except ClientError as e:
-        # Si no existe, devolvemos False; para otros errores, también False
-        return False
-    
+def parse_body(event):
+    if "body" not in event:
+        return event
+
+    body = event["body"]
+
+    if isinstance(body, str):
+        body = json.loads(body)
+
+    if isinstance(body, str):
+        body = json.loads(body)
+
+    return body
+
+
 def get_user_sub(event):
-    auth = event["headers"].get("authorization") or event["headers"].get("Authorization")
-    token = auth.split(" ")[1]
+    return event["requestContext"]["authorizer"]["claims"]["sub"]
 
-    decoded = jwt.decode(token, options={"verify_signature": False})
-    return decoded["sub"]
-    
-def check_limit(user_id):
+def check_usage_limit(user_id):
+
     resp = usage_table.get_item(Key={"userId": user_id})
+
     if "Item" not in resp:
         return False, 0, 1800
 
     item = resp["Item"]
-    exceeded = item.get("totalSeconds", 0) >= item.get("limitSeconds", 1800)
-    return exceeded, item.get("totalSeconds", 0), item.get("limitSeconds", 1800)
+
+    used = item.get("totalSeconds", 0)
+    limit = item.get("limitSeconds", 1800)
+
+    return used >= limit, used, limit
+
+
+def object_exists(bucket, key):
+
+    try:
+        s3_client.head_object(Bucket=bucket, Key=key)
+        return True
+    except ClientError:
+        return False
+
+
+# -----------------------------------------------------
+# Lambda handler
+# -----------------------------------------------------
 
 def lambda_handler(event, context):
-    logger.info(f"Received event: {json.dumps(event)}")
 
-    # Normalizamos body
-    if 'body' in event:
-        try:
-            body = event['body']
-            if isinstance(body, str):
-                body = json.loads(body)
+    logger.info("Event received")
+    logger.info(json.dumps(event))
 
-            # Si después de cargar sigue siendo str, cargamos otra vez
-            if isinstance(body, str):
-                body = json.loads(body)
-        except Exception as e:
-            logger.error(f"Error parsing body: {str(e)}")
-            return _resp(400, {"error": "Invalid body"})
-    else:
-        body = event
+    try:
 
-    logger.info(f"Request body: {body}")
-    logger.info(f"Parsed body type: {type(body)}")
+        body = parse_body(event)
 
-    # ---------------------------
-    # RUTA 1: checkStatus
-    # ---------------------------
-    if 'checkStatus' in body:
-        try:
-            job_name = body['checkStatus']['job_name']
+        # -------------------------------------------------
+        # ROUTE: checkStatus
+        # -------------------------------------------------
+        if "checkStatus" in body:
 
-            # Estado del job de Transcribe
-            tj = transcribe_client.get_transcription_job(TranscriptionJobName=job_name)
-            status = tj['TranscriptionJob']['TranscriptionJobStatus']  # IN_PROGRESS | COMPLETED | FAILED
+            job_name = body["checkStatus"]["job_name"]
 
-            # Claves esperadas por tu pipeline por eventos:
-            #   transcripciones/JobName.json          (lo escribe Transcribe)
-            #   transcripciones-formateadas/JobName.txt (lo escribe tu Lambda de "formatear")
-            #   resumenes/JobName_summary.txt           (lo escribe tu Lambda de "resumir")
+            tj = transcribe_client.get_transcription_job(
+                TranscriptionJobName=job_name
+            )
+
+            status = tj["TranscriptionJob"]["TranscriptionJobStatus"]
+
             formatted_key = f"transcripciones-formateadas/{job_name}.txt"
-            summary_key   = f"resumenes/{job_name}_summary.txt"
+            summary_key = f"resumenes/{job_name}_summary.txt"
 
-            formatted_ready = _object_exists(output_bucket, formatted_key)
-            summary_ready   = _object_exists(output_bucket, summary_key)
+            return response(
+                200,
+                {
+                    "status": status,
+                    "formattedReady": object_exists(output_bucket, formatted_key),
+                    "summaryReady": object_exists(output_bucket, summary_key),
+                    "keys": {
+                        "formatted": formatted_key,
+                        "summary": summary_key,
+                    },
+                },
+            )
 
-            return _resp(200, {
-                "status": status,
-                "formattedReady": formatted_ready,
-                "summaryReady": summary_ready,
-                "keys": {
-                    "formatted": formatted_key,
-                    "summary": summary_key
-                }
-            })
-        except Exception as e:
-            logger.error(f"checkStatus error: {str(e)}")
-            return _resp(500, {"error": str(e)})
+        # -------------------------------------------------
+        # ROUTE: getResults
+        # -------------------------------------------------
+        if "getResults" in body:
 
-    # ---------------------------
-    # RUTA 2: getResults
-    # ---------------------------
-    if 'getResults' in body:
-        try:
-            job_name = body['getResults']['job_name']
-            # bucketName viene en body pero usamos el oficial del stack por env
+            job_name = body["getResults"]["job_name"]
+
             formatted_key = f"transcripciones-formateadas/{job_name}.txt"
-            summary_key   = f"resumenes/{job_name}_summary.txt"
+            summary_key = f"resumenes/{job_name}_summary.txt"
 
             transcription = None
             summary = None
 
             try:
                 obj = s3_client.get_object(Bucket=output_bucket, Key=formatted_key)
-                transcription = obj['Body'].read().decode('utf-8')
+                transcription = obj["Body"].read().decode("utf-8")
             except ClientError:
                 pass
 
             try:
                 obj = s3_client.get_object(Bucket=output_bucket, Key=summary_key)
-                summary = obj['Body'].read().decode('utf-8')
+                summary = obj["Body"].read().decode("utf-8")
             except ClientError:
                 pass
 
-            return _resp(200, {
-                "transcription": transcription,
-                "summary": summary
-            })
-        except Exception as e:
-            logger.error(f"getResults error: {str(e)}")
-            return _resp(500, {"error": str(e)})
+            return response(
+                200,
+                {
+                    "transcription": transcription,
+                    "summary": summary,
+                },
+            )
 
-    # ---------------------------
-    # RUTA 3: iniciar transcripción (comportamiento original)
-    # ---------------------------
-    try:
-        user_id = get_user_sub(event)
-        exceeded, used, limit = check_limit(user_id)
+        # -------------------------------------------------
+        # ROUTE: start transcription
+        # -------------------------------------------------
+
+        # user_id = get_user_sub(event)
+        try:
+            user_id = get_user_sub(event)
+        except Exception as e:
+            logger.error(f"Auth error: {str(e)}")
+            return response(401, {"error": "Unauthorized"})
+
+
+        exceeded, used, limit = check_usage_limit(user_id)
 
         if exceeded:
-            return _resp(403, {
-                "error": "Límite de uso alcanzado",
-                "usedSeconds": used,
-                "limitSeconds": limit
-            })
-        
-        # bucketName = body['s3']['bucketName']
-        bucketName = output_bucket
-        key = body['s3']['key']
+            return response(
+                403,
+                {
+                    "error": "Usage limit reached",
+                    "usedSeconds": used,
+                    "limitSeconds": limit,
+                },
+            )
 
-        # Verificar tamaño del archivo antes de procesar
-        obj = s3_client.head_object(Bucket=bucketName, Key=key)
+        s3_info = body.get("s3")
+
+        if not s3_info:
+            return response(400, {"error": "Missing s3 info"})
+
+        key = s3_info["key"]
+
+        if not key.endswith(".mp3") or not key.startswith("audios/"):
+            return response(400, {"error": "Invalid S3 key"})
+
+        # -------------------------------------------------
+        # check audio size
+        # -------------------------------------------------
+
+        obj = s3_client.head_object(Bucket=output_bucket, Key=key)
+
         size_bytes = obj["ContentLength"]
 
         size_mb = size_bytes / (1024 * 1024)
+
         MAX_AUDIO_MB = 30
 
         if size_mb > MAX_AUDIO_MB:
-            return _resp(400, {
-                "error": "Audio demasiado largo para usuarios beta",
-                "maxMinutes": 30
-            })
+            return response(
+                400,
+                {
+                    "error": "Audio too long for beta users",
+                    "maxMinutes": 30,
+                },
+            )
 
-        languageCode = body['transcribe']['languageCode']
-        maxSpeakers = body['transcribe']['maxSpeakers']
+        # -------------------------------------------------
+        # start transcription job
+        # -------------------------------------------------
 
-        if not key.endswith(".mp3") or not key.startswith("audios/"):
-            logger.warning(f"Ignorando archivo no válido: {key}")
-            return _resp(400, {"error": "Clave S3 inválida"})
+        language_code = body["transcribe"]["languageCode"]
+        max_speakers = body["transcribe"]["maxSpeakers"]
 
         job_name = f"{user_id}-{uuid.uuid4()}"
-        # job_name = f"transcription-job-{uuid.uuid4()}"
-        media_uri = f"s3://{bucketName}/{key}"
+
+        media_uri = f"s3://{output_bucket}/{key}"
+
         output_key = f"transcripciones/{job_name}.json"
 
         transcribe_client.start_transcription_job(
             TranscriptionJobName=job_name,
-            Media={'MediaFileUri': media_uri},
-            MediaFormat='mp3',
-            LanguageCode=languageCode,
+            Media={"MediaFileUri": media_uri},
+            MediaFormat="mp3",
+            LanguageCode=language_code,
             OutputBucketName=output_bucket,
             OutputKey=output_key,
             Settings={
-                'ShowSpeakerLabels': True,
-                'MaxSpeakerLabels': maxSpeakers
-            }
+                "ShowSpeakerLabels": True,
+                "MaxSpeakerLabels": max_speakers,
+            },
         )
-        logger.info(f"Transcripción iniciada para: {media_uri}")
 
-        return _resp(200, {
-            "message": "Transcripción iniciada correctamente.",
-            "jobName": job_name,
-            "outputLocation": f"s3://{output_bucket}/{output_key}"
-        })
+        logger.info(f"Transcription started: {media_uri}")
+
+        return response(
+            200,
+            {
+                "message": "Transcription started",
+                "jobName": job_name,
+                "outputLocation": f"s3://{output_bucket}/{output_key}",
+            },
+        )
+
     except Exception as e:
-        logger.error(f"Error al iniciar transcripción: {str(e)}")
-        return _resp(500, {"error": str(e)})
+
+        logger.error(str(e))
+        return response(500, {"error": str(e)})
