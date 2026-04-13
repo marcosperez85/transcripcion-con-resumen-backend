@@ -102,8 +102,8 @@ def lambda_handler(event, context):
 
             status = tj["TranscriptionJob"]["TranscriptionJobStatus"]
 
-            formatted_key = f"transcripciones-formateadas/{job_name}.txt"
-            summary_key = f"resumenes/{job_name}_summary.txt"
+            formatted_key = f"transcripciones-formateadas/{user_id}/{job_name}.txt"
+            summary_key = f"resumenes/{user_id}/{job_name}_summary.txt"
 
             return response(
                 200,
@@ -125,8 +125,8 @@ def lambda_handler(event, context):
 
             job_name = body["getResults"]["job_name"]
 
-            formatted_key = f"transcripciones-formateadas/{job_name}.txt"
-            summary_key = f"resumenes/{job_name}_summary.txt"
+            formatted_key = f"transcripciones-formateadas/{user_id}/{job_name}.txt"
+            summary_key = f"resumenes/{user_id}/{job_name}_summary.txt"
 
             transcription = None
             summary = None
@@ -185,6 +185,8 @@ def lambda_handler(event, context):
         if not key.endswith(".mp3") or not key.startswith("audios/"):
             return response(400, {"error": "Invalid S3 key"})
 
+        if not key.startswith(f"audios/{user_id}/"):
+            return response(403, {"error": "Access denied"})
         # -------------------------------------------------
         # check audio size
         # -------------------------------------------------
@@ -217,7 +219,7 @@ def lambda_handler(event, context):
 
         media_uri = f"s3://{output_bucket}/{key}"
 
-        output_key = f"transcripciones/{job_name}.json"
+        output_key = f"transcripciones/{user_id}/{job_name}.json"
 
         transcribe_client.start_transcription_job(
             TranscriptionJobName=job_name,

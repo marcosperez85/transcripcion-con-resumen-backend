@@ -27,6 +27,9 @@ def lambda_handler(event, context):
         bucket = event["Records"][0]["s3"]["bucket"]["name"]
         key = event["Records"][0]["s3"]["object"]["key"]
 
+        # key example: transcripciones-formateadas/{user_id}/file.txt
+        user_id = key.split("/")[1]
+
         logger.info(f"Procesando archivo: s3://{bucket}/{key}")
 
         response = s3.get_object(Bucket=bucket, Key=key)
@@ -74,7 +77,7 @@ TEXT END
 
         # ---- Output ----
         filename = os.path.basename(key)
-        summary_key = f"resumenes/{filename.replace('.txt', '_summary.txt')}"
+        summary_key = f"resumenes/{user_id}/{filename.replace('.txt', '_summary.txt')}"
 
         s3.put_object(
             Bucket=OUTPUT_BUCKET,
@@ -127,7 +130,8 @@ def _write_failed_status(input_key, payload):
         return
 
     filename = os.path.basename(input_key)
-    error_key = f"resumenes/{filename}_FAILED.json"
+    user_id = input_key.split("/")[1]
+    error_key = f"resumenes/{user_id}/{filename}_FAILED.json"
 
     s3.put_object(
         Bucket=OUTPUT_BUCKET,
@@ -136,3 +140,4 @@ def _write_failed_status(input_key, payload):
     )
 
     logger.info(f"Estado FAILED escrito en s3://{OUTPUT_BUCKET}/{error_key}")
+    logger.info(f"USER {user_id} summary generated for {filename}")

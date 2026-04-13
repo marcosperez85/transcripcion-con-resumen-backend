@@ -71,9 +71,12 @@ def lambda_handler(event, context):
         # Guardar archivo .txt
         filename = os.path.basename(key).replace(".json", ".txt")
         job_name = filename.replace(".txt", "")
-        user_id = job_name.split("-")[0]
 
-        txt_key = f"transcripciones-formateadas/{filename}"
+        # NEW: extract user_id from path instead of job_name
+        # key example: transcripciones/{user_id}/{job_name}.json
+        user_id = key.split("/")[1]
+
+        txt_key = f"transcripciones-formateadas/{user_id}/{filename}"
         s3_client.put_object(
             Bucket=bucket,
             Key=txt_key,
@@ -99,7 +102,9 @@ def lambda_handler(event, context):
             }
         )
 
-        logger.info(f"Duración {duration_seconds}s agregada al usuario {user_id}")
+        logger.info(f"USER {user_id} processed audio duration: {duration_seconds}s")
+        logger.info(f"USER {user_id} TOTAL_USAGE updated +{duration_seconds}s")
+        
 
     except Exception as e:
         logger.error(f"Error al procesar transcripción: {str(e)}")
