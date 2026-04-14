@@ -50,7 +50,10 @@ def parse_body(event):
 
 
 def get_user_sub(event):
-    return event["requestContext"]["authorizer"]["claims"]["sub"]
+    try:
+        return event["requestContext"]["authorizer"]["claims"]["sub"]
+    except Exception:
+        raise Exception("Missing authorizer claims")
 
 def check_usage_limit(user_id):
 
@@ -88,6 +91,13 @@ def lambda_handler(event, context):
     try:
 
         body = parse_body(event)
+
+        # ALWAYS extract user first
+        try:
+            user_id = get_user_sub(event)
+        except Exception as e:
+            logger.error(f"Auth error: {str(e)}")
+            return response(401, {"error": "Unauthorized"})
 
         # -------------------------------------------------
         # ROUTE: checkStatus
@@ -155,14 +165,6 @@ def lambda_handler(event, context):
         # ROUTE: start transcription
         # -------------------------------------------------
 
-        # user_id = get_user_sub(event)
-        try:
-            user_id = get_user_sub(event)
-        except Exception as e:
-            logger.error(f"Auth error: {str(e)}")
-            return response(401, {"error": "Unauthorized"})
-
-
         exceeded, used, limit = check_usage_limit(user_id)
 
         if exceeded:
@@ -185,8 +187,6 @@ def lambda_handler(event, context):
         if not key.endswith(".mp3") or not key.startswith("audios/"):
             return response(400, {"error": "Invalid S3 key"})
 
-        if not key.startswith(f"audios/{user_id}/"):
-            return response(403, {"error": "Access denied"})
         # -------------------------------------------------
         # check audio size
         # -------------------------------------------------
@@ -198,6 +198,8 @@ def lambda_handler(event, context):
         size_mb = size_bytes / (1024 * 1024)
 
         MAX_AUDIO_MB = 30
+
+        logger.info(f"USAGE → used: {used}, limit: {limit}")
 
         if size_mb > MAX_AUDIO_MB:
             return response(
