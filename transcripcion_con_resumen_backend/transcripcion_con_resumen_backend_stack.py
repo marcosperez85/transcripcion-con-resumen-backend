@@ -229,6 +229,14 @@ class TranscripcionConResumenBackendStack(Stack):
             "USAGE_TABLE": self.usage_table.table_name
         }
 
+        # Create FFmpeg layer for audio conversion
+        ffmpeg_layer = lambda_.LayerVersion(
+            self, "FFmpegLayer",
+            code=lambda_.Code.from_asset("layers/ffmpeg"),
+            compatible_runtimes=[lambda_.Runtime.PYTHON_3_12],
+            description="FFmpeg for audio conversion"
+        )
+
         self.fn_transcribir = lambda_.Function(
             self,
             "proyecto1-transcribir-audios",
@@ -237,8 +245,9 @@ class TranscripcionConResumenBackendStack(Stack):
             handler="lambda_function.lambda_handler",
             code=lambda_.Code.from_asset("lambda/transcribir"),
             environment=common_env,
-            timeout=Duration.minutes(5),
-            memory_size=512,
+            timeout=Duration.minutes(10),           # Incremento la duración por la conversión de formato
+            memory_size=1024,                       # Agrego más memoria para el FFmpeg
+            layers=[ffmpeg_layer],                  # Llamo al layer ffmpeg creado antes
         )
 
         # Permisos para acceder a DynamoDB
