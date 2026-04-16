@@ -98,6 +98,10 @@ def lambda_handler(event, context):
         except Exception as e:
             logger.error(f"Auth error: {str(e)}")
             return response(401, {"error": "Unauthorized"})
+        
+        supported_formats = [
+            "amr", "flac", "m4a", "mp3", "mp4", "ogg", "webm", "wav"
+        ]
 
         # -------------------------------------------------
         # ROUTE: checkStatus
@@ -184,8 +188,9 @@ def lambda_handler(event, context):
 
         key = s3_info["key"]
 
-        if not key.endswith(".mp3") or not key.startswith("audios/"):
-            return response(400, {"error": "Invalid S3 key"})
+        # Validar que la extensión corresponda a un audio pero sin limitarse a mp3
+        if not any(key.lower().endswith(f".{fmt}") for fmt in supported_formats) or not key.startswith("audios/"):
+            return response(400, {"error": "Invalid S3 key or unsupported format"})
 
         # -------------------------------------------------
         # check audio size
@@ -209,31 +214,43 @@ def lambda_handler(event, context):
                     "maxMinutes": 30,
                 },
             )
+        # -------------------------------------------------
+        # Revisar formato de audio
+        # -------------------------------------------------
+
+        file_key = body["s3"]["key"]
+        media_format = file_key.split(".")[-1].lower()
 
         # -------------------------------------------------
         # start transcription job
         # -------------------------------------------------
 
         language_code = body["transcribe"]["languageCode"]
-        max_speakers = body["transcribe"]["maxSpeakers"]
+        max_speakers = body["transcribe"].get("maxSpeakers", 2)
+
+        settings = {}
+
+        # SOLO habilitar speaker labels si maxSpeakers > 1
+        if isinstance(max_speakers, int) and max_speakers > 1:
+            settings["ShowSpeakerLabels"] = True
+            settings["MaxSpeakerLabels"] = max_speakers
+
 
         job_name = f"{user_id}-{uuid.uuid4()}"
 
-        media_uri = f"s3://{output_bucket}/{key}"
+        # Usar file_key en lugar de key para consistencia
+        media_uri = f"s3://{output_bucket}/{file_key}"
 
         output_key = f"transcripciones/{user_id}/{job_name}.json"
 
         transcribe_client.start_transcription_job(
             TranscriptionJobName=job_name,
             Media={"MediaFileUri": media_uri},
-            MediaFormat="mp3",
+            MediaFormat=media_format,
             LanguageCode=language_code,
             OutputBucketName=output_bucket,
             OutputKey=output_key,
-            Settings={
-                "ShowSpeakerLabels": True,
-                "MaxSpeakerLabels": max_speakers,
-            },
+            Settings=settings
         )
 
         logger.info(f"Transcription started: {media_uri}")
