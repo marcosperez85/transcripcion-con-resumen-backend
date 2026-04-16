@@ -4,6 +4,8 @@ import logging
 import json
 import os
 import base64
+import subprocess
+import tempfile
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
@@ -78,6 +80,48 @@ def object_exists(bucket, key):
     except ClientError:
         return False
 
+
+
+def needs_conversion(media_format):
+    """Check if audio format needs conversion"""
+    # Formats that often contain unsupported codecs
+    problematic_formats = ["m4a", "mp4", "ogg", "webm"]
+    return media_format in problematic_formats
+
+def convert_to_mp3(input_key):
+    """Convert audio file to MP3 format"""
+    logger.info(f"Converting {input_key} to MP3")
+    
+    with tempfile.TemporaryDirectory() as temp_dir:
+        ext = input_key.split('.')[-1]
+        input_file = os.path.join(temp_dir, f"input_audio.{ext}")
+        output_file = os.path.join(temp_dir, "output.mp3")
+        
+        # Download original file
+        s3_client.download_file(output_bucket, input_key, input_file)
+        
+        # Convert using FFmpeg (simple, reliable settings)
+        try:
+            subprocess.run([
+                '/opt/bin/ffmpeg',
+                '-i', input_file,
+                '-acodec', 'libmp3lame',  # MP3 codec
+                '-ar', '16000',           # Good for speech recognition
+                '-ac', '1',               # Mono (saves bandwidth)
+                '-b:a', '64k',           # Sufficient for speech
+                '-y',                    # Overwrite output file
+                output_file
+            ], check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"FFmpeg failed: {e.stderr}")
+            raise
+        
+        # Upload converted file
+        converted_key = input_key.replace(f".{input_key.split('.')[-1]}", "_converted.mp3")
+        s3_client.upload_file(output_file, output_bucket, converted_key)
+        
+        logger.info(f"Conversion complete: {converted_key}")
+        return converted_key
 
 # -----------------------------------------------------
 # Lambda handler
@@ -215,11 +259,18 @@ def lambda_handler(event, context):
                 },
             )
         # -------------------------------------------------
-        # Revisar formato de audio
+        # Revisar formato de audio y realizar conversión si fuera necesario
         # -------------------------------------------------
 
         file_key = body["s3"]["key"]
-        media_format = file_key.split(".")[-1].lower()
+        original_format = file_key.split(".")[-1].lower()
+
+        # Convert if needed
+        if needs_conversion(original_format):
+            file_key = convert_to_mp3(file_key)
+            media_format = "mp3"
+        else:
+            media_format = original_format
 
         # -------------------------------------------------
         # start transcription job
@@ -234,7 +285,6 @@ def lambda_handler(event, context):
         if isinstance(max_speakers, int) and max_speakers > 1:
             settings["ShowSpeakerLabels"] = True
             settings["MaxSpeakerLabels"] = max_speakers
-
 
         job_name = f"{user_id}-{uuid.uuid4()}"
 
