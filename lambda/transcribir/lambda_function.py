@@ -20,6 +20,8 @@ output_bucket = os.environ["BUCKET"]
 dynamodb = boto3.resource("dynamodb")
 usage_table = dynamodb.Table(os.environ["USAGE_TABLE"])
 
+segundos_gratis = 600
+
 
 # -----------------------------------------------------
 # Helpers
@@ -63,12 +65,12 @@ def check_usage_limit(user_id):
     resp = usage_table.get_item(Key={"userId": user_id})
 
     if "Item" not in resp:
-        return False, 0, 1800
+        return False, 0, segundos_gratis
 
     item = resp["Item"]
 
     used = item.get("totalSeconds", 0)
-    limit = item.get("limitSeconds", 1800)
+    limit = item.get("limitSeconds", segundos_gratis)
 
     return used >= limit, used, limit
 
@@ -172,7 +174,7 @@ def update_usage_record(user_id, audio_duration_seconds):
             ExpressionAttributeValues={
                 ":duration": audio_duration_seconds,
                 ":zero": 0,
-                ":limit": 1800,
+                ":limit": segundos_gratis,
                 ":now": datetime.utcnow().isoformat()
             },
             ReturnValues="UPDATED_NEW"
@@ -381,7 +383,7 @@ def lambda_handler(event, context):
         return response(
             200,
             {
-                                                "message": "Transcription started",
+                "message": "Transcription started",
                 "jobName": job_name,
                 "outputLocation": f"s3://{output_bucket}/{output_key}",
                 "estimatedDuration": estimated_duration
