@@ -69,19 +69,27 @@ class TranscripcionConResumenBackendStack(Stack):
         
         # User Pool y User Pool Client
         user_pool = cognito.UserPool(
-            self, "TranscripcionUserPool",
-            user_pool_name="transcripcion-con-resumen-user-pool",
-            sign_in_aliases=cognito.SignInAliases(email=True),
-            auto_verify=cognito.AutoVerifiedAttrs(email=True),
-            password_policy=cognito.PasswordPolicy(
-                min_length=8,
-                require_lowercase=True,
-                require_uppercase=True,
-                require_digits=True,
-                require_symbols=False,
-            ),
-            removal_policy=RemovalPolicy.DESTROY,
-        )
+                    self, "TranscripcionUserPool",
+                    user_pool_name="transcripcion-con-resumen-user-pool",
+                    sign_in_aliases=cognito.SignInAliases(email=True),
+                    auto_verify=cognito.AutoVerifiedAttrs(email=True),
+                    # Permitir auto-registro
+                    self_sign_up_enabled=True,
+                    # Configurar flujo de verificación
+                    user_verification=cognito.UserVerificationConfig(
+                        email_subject="Verifica tu cuenta para Transcripción con Resumen",
+                        email_body="Gracias por registrarte. Tu código de verificación es {####}",
+                        email_style=cognito.VerificationEmailStyle.CODE,
+                    ),
+                    password_policy=cognito.PasswordPolicy(
+                        min_length=8,
+                        require_lowercase=True,
+                        require_uppercase=True,
+                        require_digits=True,
+                        require_symbols=False,
+                    ),
+                    removal_policy=RemovalPolicy.DESTROY,
+                )
 
         user_pool_client = cognito.UserPoolClient(
             self, "TranscripcionUserPoolClient",
