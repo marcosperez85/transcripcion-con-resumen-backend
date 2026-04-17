@@ -325,6 +325,19 @@ class TranscripcionConResumenBackendStack(Stack):
                 resources=[f"{self.bucket.bucket_arn}/{self.PFX_TRANSCRIPCIONES_FMT}*"],
             )
         )
+
+        # Permiso al lambda de resúmenes a listar objetos del bucket de transcripciones pero filtrando por prefijo
+        self.fn_resumir.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["s3:ListBucket"],
+                resources=[self.bucket.bucket_arn],
+                conditions={
+                    "StringLike": {
+                        "s3:prefix": [f"{self.PFX_TRANSCRIPCIONES_FMT}*"]
+                    }
+                },
+            )
+        )
         self.fn_resumir.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["s3:PutObject"],
@@ -355,9 +368,20 @@ class TranscripcionConResumenBackendStack(Stack):
                     "bedrock:InvokeModelWithResponseStream",
                 ],
                 # Especifico sólo los modelos que realmente uso
+                # resources=[
+                #     f"arn:aws:bedrock:{self.region}::foundation-model/meta.llama3-70b-instruct-v1:0",
+                #     f"arn:aws:bedrock:{self.region}::foundation-model/us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+                #     f"arn:aws:bedrock:{self.region}:{self.account}:inference-profile/us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+                # ],
+
+                # Alternativa simple para iteración. 
+                # Pemite todos los foundation models y todos los perfiles de inferencia con el * al final.
+                # Además permite todas las regiones en 'Bedrock:*:'
+                # NO USAR EN PRODUCCIÓN
                 resources=[
-                    f"arn:aws:bedrock:{self.region}::foundation-model/meta.llama3-70b-instruct-v1:0",
-                ],
+                    f"arn:aws:bedrock:*:{self.account}:inference-profile/*",
+                    f"arn:aws:bedrock:*::foundation-model/*"
+                ]
             )
         )
 
