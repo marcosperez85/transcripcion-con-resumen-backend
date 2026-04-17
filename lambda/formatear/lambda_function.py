@@ -86,24 +86,25 @@ def lambda_handler(event, context):
 
         logger.info(f"Archivo TXT guardado en: s3://{bucket}/{txt_key}")
 
+                # Update the DynamoDB table with the actual duration
+        # This will replace the estimated duration recorded during initial upload
         usage_table.update_item(
             Key={"userId": user_id},
             UpdateExpression="""
-                SET totalSeconds = if_not_exists(totalSeconds, :zero) + :delta,
-                    limitSeconds = if_not_exists(limitSeconds, :limit),
-                    updatedAt = :now
+                SET actualSeconds = if_not_exists(actualSeconds, :zero) + :delta,
+                    lastProcessedAt = :now,
+                    lastProcessedDuration = :duration
             """,
-            ConditionExpression="attribute_not_exists(totalSeconds) OR totalSeconds < :limit",
             ExpressionAttributeValues={
                 ":delta": duration_seconds,
                 ":zero": 0,
-                ":limit": 1800,
+                ":duration": duration_seconds,
                 ":now": datetime.utcnow().isoformat()
             }
         )
 
         logger.info(f"USER {user_id} processed audio duration: {duration_seconds}s")
-        logger.info(f"USER {user_id} TOTAL_USAGE updated +{duration_seconds}s")
+        logger.info(f"USER {user_id} ACTUAL_USAGE updated with duration: {duration_seconds}s")
         
 
     except Exception as e:
