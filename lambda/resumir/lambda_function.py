@@ -16,7 +16,8 @@ bedrock = boto3.client(
     region_name=REGION
 )
 
-MODEL_ID = "meta.llama3-70b-instruct-v1:0"
+# Cambiado a Claude 3 Sonnet para mejor soporte multilingüe
+MODEL_ID = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
 
 
 def lambda_handler(event, context):
@@ -37,32 +38,40 @@ def lambda_handler(event, context):
 
         # ---- Prompt recomendado ----
         prompt = f"""
-You are a professional summarization assistant.
+You are a professional summarization assistant who respects the original language of the text.
 
 TASK:
 Generate a clean, well-structured summary from this transcription
-            
+
+LANGUAGE INSTRUCTION:
+- If the text is in Spanish: Debes responder COMPLETAMENTE en español.
+- If the text is in English: Respond completely in English.
+- For any other language: Maintain that original language.
+
 REQUIREMENTS:
 - Output ONLY the summary.
 - Do NOT repeat sentences from the original text.
 - Do NOT include separators, tables, or special characters.
 - Use a concise bullet list.
-- Preserve the original language.
 - Do NOT add any additional comments
-            
+
 TEXT START
 {text}
 TEXT END
 """.strip()
 
         body = {
-            "prompt": prompt,
-            "max_gen_len": 1024,
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 1024,
             "temperature": 0.3,
-            "top_p": 0.9
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
         }
 
-        # ---- Invocación a Bedrock ----
         response = bedrock.invoke_model(
             modelId=MODEL_ID,
             contentType="application/json",
@@ -71,9 +80,7 @@ TEXT END
         )
 
         response_body = json.loads(response["body"].read())
-
-        # ---- Parsing correcto ----
-        summary = response_body["generation"]
+        summary = response_body["content"][0]["text"]
 
         # ---- Output ----
         filename = os.path.basename(key)
