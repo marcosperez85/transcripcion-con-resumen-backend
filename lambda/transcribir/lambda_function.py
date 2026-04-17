@@ -6,6 +6,7 @@ import os
 import base64
 import subprocess
 import tempfile
+from datetime import datetime
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
@@ -122,6 +123,67 @@ def convert_to_mp3(input_key):
         
         logger.info(f"Conversion complete: {converted_key}")
         return converted_key
+
+
+def estimate_audio_duration(size_bytes, format_type):
+    """
+    Estimate audio duration based on file size and format.
+    This is a fallback method when we can't directly analyze the audio.
+    """
+    # Average bitrates for different formats (in bits per second)
+    bitrates = {
+        "mp3": 128000,  # 128 kbps
+        "wav": 1411000,  # CD quality
+        "flac": 700000,  # ~700 kbps
+        "ogg": 128000,  # ~128 kbps
+        "m4a": 128000,  # ~128 kbps
+        "amr": 12200,   # ~12.2 kbps
+        "mp4": 128000,  # audio track estimate
+        "webm": 128000  # audio track estimate
+    }
+    
+    bitrate = bitrates.get(format_type.lower(), 128000)
+    
+    # Duration = size in bits / bitrate
+    estimated_duration = (size_bytes * 8) / bitrate
+    
+    # Add 10% buffer to the estimate
+    return int(estimated_duration * 1.1)
+
+
+def update_usage_record(user_id, audio_duration_seconds):
+    """
+    Updates the user's usage record in DynamoDB by adding the audio duration
+    to their total used seconds.
+    
+    Args:
+        user_id: The Cognito user ID (sub)
+        audio_duration_seconds: Duration of processed audio in seconds
+    """
+    try:
+        # Use UpdateExpression to either create a new record or update existing one
+        response = usage_table.update_item(
+            Key={"userId": user_id},
+            UpdateExpression="""
+                SET totalSeconds = if_not_exists(totalSeconds, :zero) + :duration,
+                limitSeconds = if_not_exists(limitSeconds, :limit),
+                updatedAt = :now
+            """,
+            ExpressionAttributeValues={
+                ":duration": audio_duration_seconds,
+                ":zero": 0,
+                ":limit": 1800,
+                ":now": datetime.utcnow().isoformat()
+            },
+            ReturnValues="UPDATED_NEW"
+        )
+        
+        logger.info(f"Updated usage for user {user_id}: +{audio_duration_seconds}s, " 
+                   f"new total: {response.get('Attributes', {}).get('totalSeconds', 'unknown')}s")
+        return True
+    except Exception as e:
+        logger.error(f"Error updating usage record: {str(e)}")
+        return False
 
 # -----------------------------------------------------
 # Lambda handler
@@ -258,6 +320,17 @@ def lambda_handler(event, context):
                     "maxMinutes": 30,
                 },
             )
+                # -------------------------------------------------
+        # Estimate audio duration and update DynamoDB
+        # -------------------------------------------------
+        # Estimate audio duration based on file size and format
+        original_format = key.split(".")[-1].lower()
+        estimated_duration = estimate_audio_duration(size_bytes, original_format)
+        logger.info(f"Estimated duration of audio: {estimated_duration} seconds")
+        
+        # Update usage tracking in DynamoDB
+        update_usage_record(user_id, estimated_duration)
+            
         # -------------------------------------------------
         # Revisar formato de audio y realizar conversión si fuera necesario
         # -------------------------------------------------
@@ -308,9 +381,10 @@ def lambda_handler(event, context):
         return response(
             200,
             {
-                "message": "Transcription started",
+                                                "message": "Transcription started",
                 "jobName": job_name,
                 "outputLocation": f"s3://{output_bucket}/{output_key}",
+                "estimatedDuration": estimated_duration
             },
         )
 
