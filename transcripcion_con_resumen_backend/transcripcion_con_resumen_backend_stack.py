@@ -278,21 +278,29 @@ class TranscripcionConResumenBackendStack(Stack):
         )
 
         # 3 Permisos de bucket más específicos
-        # Transcribir: lee audios, escribe en transcripciones
+        # El lambra de transcribir tiene permiso de lectura al bucket de audios
+        # EDITAR: parece tener permisos de lectura sobre las transcripciones y resúmenes.
+        # Revisar si eso es necesario sino eliminar.
         self.fn_transcribir.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["s3:GetObject"],
                 resources=[
                     f"{self.bucket.bucket_arn}/{self.PFX_AUDIOS}*",
-                    f"{self.bucket.bucket_arn}/{self.PFX_TRANSCRIPCIONES_FMT}*",  # Para leer transcripciones formateadas
-                    f"{self.bucket.bucket_arn}/{self.PFX_RESUMENES}*",           # Para leer resúmenes
+                    f"{self.bucket.bucket_arn}/{self.PFX_TRANSCRIPCIONES_FMT}*",    # Para leer transcripciones formateadas
+                    f"{self.bucket.bucket_arn}/{self.PFX_RESUMENES}*",              # Para leer resúmenes
                 ],
             )
         )
+
+        # Permiso al Lambda de transcripción para subir objetos al bucket de transcripciones y de audios
+        # Esto último permite subir los archivos convertidos a mp3.
         self.fn_transcribir.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["s3:PutObject"],
-                resources=[f"{self.bucket.bucket_arn}/{self.PFX_TRANSCRIPCIONES}*"],
+                resources=[
+                    f"{self.bucket.bucket_arn}/{self.PFX_TRANSCRIPCIONES}*",
+                    f"{self.bucket.bucket_arn}/{self.PFX_AUDIOS}*"
+                ],
             )
         )
 
