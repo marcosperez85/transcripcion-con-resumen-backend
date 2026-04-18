@@ -15,7 +15,7 @@ from aws_cdk import (
 from constructs import Construct
 
 # Días en los que se borran automáticamente los objetos alojados en el bucket de backend
-dias_de_expiracion = 1
+dias_de_expiracion = 3
 
 
 class TranscripcionConResumenBackendStack(Stack):
@@ -231,10 +231,13 @@ class TranscripcionConResumenBackendStack(Stack):
             removal_policy=RemovalPolicy.DESTROY,
         )
 
+        test_mode = self.node.try_get_context("testMode") or "false"
+
         # 2) Lambdas (guardar referencias)
         common_env = {
             "BUCKET": self.bucket.bucket_name,
-            "USAGE_TABLE": self.usage_table.table_name
+            "USAGE_TABLE": self.usage_table.table_name,
+            "TEST_MODE": test_mode
         }
 
         # Create FFmpeg layer for audio conversion
@@ -273,6 +276,8 @@ class TranscripcionConResumenBackendStack(Stack):
             memory_size=512,
         )
 
+        self.usage_table.grant_read_write_data(self.fn_formatear)
+
         self.fn_resumir = lambda_.Function(
             self,
             "proyecto1-resumir-transcripciones",
@@ -284,6 +289,8 @@ class TranscripcionConResumenBackendStack(Stack):
             timeout=Duration.minutes(5),
             memory_size=512,
         )
+
+        self.usage_table.grant_read_write_data(self.fn_resumir)
 
         # 3 Permisos de bucket más específicos
         # El lambra de transcribir tiene permiso de lectura al bucket de audios
@@ -377,10 +384,9 @@ class TranscripcionConResumenBackendStack(Stack):
                 ],
                 # Especifico sólo los modelos que realmente uso
                 # resources=[
-                #     f"arn:aws:bedrock:{self.region}::foundation-model/meta.llama3-70b-instruct-v1:0",
                 #     f"arn:aws:bedrock:{self.region}::foundation-model/us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-                #     f"arn:aws:bedrock:{self.region}:{self.account}:inference-profile/us.anthropic.claude-3-7-sonnet-20250219-v1:0"
-                # ],
+                #     f"arn:aws:bedrock:{self.region}:*:inference-profile/us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+                # ]                                                           
 
                 # Alternativa simple para iteración. 
                 # Pemite todos los foundation models y todos los perfiles de inferencia con el * al final.
