@@ -63,9 +63,6 @@ def parse_body(event):
     if isinstance(body, str):
         body = json.loads(body)
 
-    if isinstance(body, str):
-        body = json.loads(body)
-
     return body
 
 
@@ -97,8 +94,6 @@ def object_exists(bucket, key):
         return True
     except ClientError:
         return False
-
-
 
 def needs_conversion(media_format):
     """Check if audio format needs conversion"""
@@ -209,7 +204,6 @@ def update_usage_record(user_id, audio_duration_seconds):
 def lambda_handler(event, context):
 
     logger.info("Event received")
-    logger.info(json.dumps(event))
 
     try:
 
@@ -218,6 +212,10 @@ def lambda_handler(event, context):
         # ALWAYS extract user first
         try:
             user_id = get_user_sub(event)
+            logger.info({
+                "path": event.get("path"),
+                "user": user_id
+            })
         except Exception as e:
             logger.error(f"Auth error: {str(e)}")
             return response(401, {"error": "Unauthorized"})
@@ -264,6 +262,9 @@ def lambda_handler(event, context):
 
             status = tj["TranscriptionJob"]["TranscriptionJobStatus"]
 
+            resp = usage_table.get_item(Key={"userId": user_id})
+            job_status = resp.get("Item", {}).get("jobStatus", "PROCESSING")
+
             formatted_key = f"transcripciones-formateadas/{user_id}/{job_name}.txt"
             summary_key = f"resumenes/{user_id}/{job_name}_summary.txt"
 
@@ -271,8 +272,7 @@ def lambda_handler(event, context):
                 200,
                 {
                     "status": status,
-                    "formattedReady": object_exists(output_bucket, formatted_key),
-                    "summaryReady": object_exists(output_bucket, summary_key),
+                    "jobStatus": job_status,
                     "keys": {
                         "formatted": formatted_key,
                         "summary": summary_key,
@@ -371,7 +371,16 @@ def lambda_handler(event, context):
         logger.info(f"Estimated duration of audio: {estimated_duration} seconds")
         
         # Update usage tracking in DynamoDB
-        update_usage_record(user_id, estimated_duration)
+        usage_table.update_item(
+            Key={"userId": user_id},
+            UpdateExpression="""
+                SET pendingSeconds = if_not_exists(pendingSeconds, :zero) + :duration
+            """,
+            ExpressionAttributeValues={
+                ":duration": estimated_duration,
+                ":zero": 0
+            }
+        )
             
         # -------------------------------------------------
         # Revisar formato de audio y realizar conversión si fuera necesario
@@ -387,7 +396,7 @@ def lambda_handler(event, context):
         else:
             media_format = original_format
 
-                # -------------------------------------------------
+        # -------------------------------------------------
         # start transcription job
         # -------------------------------------------------
 
@@ -407,8 +416,20 @@ def lambda_handler(event, context):
         media_uri = f"s3://{output_bucket}/{file_key}"
 
         output_key = f"transcripciones/{user_id}/{job_name}.json"
+
+        usage_table.update_item(
+            Key={"userId": user_id},
+            UpdateExpression="""
+                SET lastJobId = :job,
+                    jobStatus = :status
+            """,
+            ExpressionAttributeValues={
+                ":job": job_name,
+                ":status": "PROCESSING"
+            }
+        )
         
-                # Verificar si estamos en modo de prueba (para evitar costos)
+        # Verificar si estamos en modo de prueba (para evitar costos)
         # Solo se activa con la variable de entorno TEST_MODE=true
         if TEST_MODE:
             # En modo de prueba, simulamos una transcripción exitosa
