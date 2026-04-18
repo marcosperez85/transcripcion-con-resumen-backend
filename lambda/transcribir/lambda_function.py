@@ -7,8 +7,19 @@ import base64
 import subprocess
 import tempfile
 from datetime import datetime
+from decimal import Decimal
 from botocore.exceptions import ClientError
 
+# Clase auxiliar para serializar objetos Decimal de DynamoDB
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return super(DecimalEncoder, self).default(obj)
+
+# -----------------------------------------------------
+# Variables Globales
+# -----------------------------------------------------
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
@@ -20,6 +31,10 @@ output_bucket = os.environ["BUCKET"]
 dynamodb = boto3.resource("dynamodb")
 usage_table = dynamodb.Table(os.environ["USAGE_TABLE"])
 
+# Modo de prueba (para evitar usar Amazon Transcribe)
+TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
+
+# Límite de segundos gratuitos
 segundos_gratis = 600
 
 
@@ -35,7 +50,7 @@ def response(code, payload):
             "Access-Control-Allow-Headers": "Content-Type,Authorization",
             "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
         },
-        "body": json.dumps(payload),
+        "body": json.dumps(payload, cls=DecimalEncoder),
     }
 
 
@@ -211,6 +226,31 @@ def lambda_handler(event, context):
             "amr", "flac", "m4a", "mp3", "mp4", "ogg", "webm", "wav"
         ]
 
+                # -------------------------------------------------
+        # ROUTE: checkUsage
+        # -------------------------------------------------
+        if "checkUsage" in body:
+            resp = usage_table.get_item(Key={"userId": user_id})
+
+            used_seconds = 0
+            limit_seconds = segundos_gratis
+            
+            if "Item" in resp:
+                item = resp["Item"]
+                used_seconds = item.get("totalSeconds", 0)
+                limit_seconds = item.get("limitSeconds", segundos_gratis)
+            
+            remaining_seconds = max(0, limit_seconds - used_seconds)
+            
+            return response(
+                200,
+                {
+                    "usedSeconds": used_seconds,
+                    "limitSeconds": limit_seconds,
+                    "remainingSeconds": remaining_seconds
+                },
+            )
+
         # -------------------------------------------------
         # ROUTE: checkStatus
         # -------------------------------------------------
@@ -347,7 +387,7 @@ def lambda_handler(event, context):
         else:
             media_format = original_format
 
-        # -------------------------------------------------
+                # -------------------------------------------------
         # start transcription job
         # -------------------------------------------------
 
@@ -367,16 +407,88 @@ def lambda_handler(event, context):
         media_uri = f"s3://{output_bucket}/{file_key}"
 
         output_key = f"transcripciones/{user_id}/{job_name}.json"
-
-        transcribe_client.start_transcription_job(
-            TranscriptionJobName=job_name,
-            Media={"MediaFileUri": media_uri},
-            MediaFormat=media_format,
-            LanguageCode=language_code,
-            OutputBucketName=output_bucket,
-            OutputKey=output_key,
-            Settings=settings
-        )
+        
+                # Verificar si estamos en modo de prueba (para evitar costos)
+        # Solo se activa con la variable de entorno TEST_MODE=true
+        if TEST_MODE:
+            # En modo de prueba, simulamos una transcripción exitosa
+            logger.info("TEST MODE: Simulando transcripción exitosa sin usar Amazon Transcribe")
+            
+            # Crear una transcripción de prueba y subirla a S3
+            sample_transcript = {
+                "jobName": job_name,
+                "accountId": "123456789012",
+                "results": {
+                    "transcripts": [
+                        {"transcript": "Esta es una transcripción de prueba para evitar costos de Amazon Transcribe."}
+                    ],
+                    "items": [
+                        {"start_time": "0.0", "end_time": "2.0", "alternatives": [{"content": "Esta"}], "type": "pronunciation"},
+                        {"start_time": "2.1", "end_time": "2.2", "alternatives": [{"content": "es"}], "type": "pronunciation"},
+                        {"start_time": "2.3", "end_time": "2.4", "alternatives": [{"content": "una"}], "type": "pronunciation"},
+                        {"start_time": "2.5", "end_time": "3.0", "alternatives": [{"content": "transcripción"}], "type": "pronunciation"},
+                        {"start_time": "3.1", "end_time": "3.2", "alternatives": [{"content": "de"}], "type": "pronunciation"},
+                        {"start_time": "3.3", "end_time": "3.5", "alternatives": [{"content": "prueba"}], "type": "pronunciation"},
+                        {"start_time": "3.6", "end_time": "3.8", "alternatives": [{"content": "para"}], "type": "pronunciation"},
+                        {"start_time": "3.9", "end_time": "4.1", "alternatives": [{"content": "evitar"}], "type": "pronunciation"},
+                        {"start_time": "4.2", "end_time": "4.5", "alternatives": [{"content": "costos"}], "type": "pronunciation"},
+                        {"start_time": "4.6", "end_time": "4.8", "alternatives": [{"content": "de"}], "type": "pronunciation"},
+                        {"start_time": "4.9", "end_time": "5.2", "alternatives": [{"content": "Amazon"}], "type": "pronunciation"},
+                        {"start_time": "5.3", "end_time": "6.0", "alternatives": [{"content": "Transcribe"}], "type": "pronunciation"},
+                        {"start_time": "6.1", "end_time": "6.2", "alternatives": [{"content": "."}], "type": "punctuation"}
+                    ],
+                    "speaker_labels": {
+                        "speakers": 1,
+                        "segments": [
+                            {
+                                "start_time": "0.0",
+                                "end_time": "6.0",
+                                "speaker_label": "spk_0",
+                                "items": [
+                                    {"start_time": "0.0", "speaker_label": "spk_0"},
+                                    {"start_time": "2.1", "speaker_label": "spk_0"},
+                                    {"start_time": "2.3", "speaker_label": "spk_0"},
+                                    {"start_time": "2.5", "speaker_label": "spk_0"},
+                                    {"start_time": "3.1", "speaker_label": "spk_0"},
+                                    {"start_time": "3.3", "speaker_label": "spk_0"},
+                                    {"start_time": "3.6", "speaker_label": "spk_0"},
+                                    {"start_time": "3.9", "speaker_label": "spk_0"},
+                                    {"start_time": "4.2", "speaker_label": "spk_0"},
+                                    {"start_time": "4.6", "speaker_label": "spk_0"},
+                                    {"start_time": "4.9", "speaker_label": "spk_0"},
+                                    {"start_time": "5.3", "speaker_label": "spk_0"}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "status": "COMPLETED"
+            }
+            
+            # Subir la transcripción de prueba a S3
+            s3_client.put_object(
+                Bucket=output_bucket,
+                Key=output_key,
+                Body=json.dumps(sample_transcript, cls=DecimalEncoder).encode('utf-8'),
+                ContentType='application/json'
+            )
+            
+            logger.info(f"TEST MODE: Transcripción de prueba guardada en: s3://{output_bucket}/{output_key}")
+            
+            # Añadir un delay mínimo para simular procesamiento
+            import time
+            time.sleep(1)
+        else:
+            # Modo normal: usar Amazon Transcribe
+            transcribe_client.start_transcription_job(
+                TranscriptionJobName=job_name,
+                Media={"MediaFileUri": media_uri},
+                MediaFormat=media_format,
+                LanguageCode=language_code,
+                OutputBucketName=output_bucket,
+                OutputKey=output_key,
+                Settings=settings
+            )
 
         logger.info(f"Transcription started: {media_uri}")
 
