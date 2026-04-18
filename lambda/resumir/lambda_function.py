@@ -10,15 +10,20 @@ logger.setLevel(logging.INFO)
 OUTPUT_BUCKET = os.environ["BUCKET"]
 REGION = os.environ["AWS_REGION"]
 
+# Añadir la definición de TEST_MODE
+TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
+
 s3 = boto3.client("s3")
 bedrock = boto3.client(
     "bedrock-runtime",
     region_name=REGION
 )
 
+dynamodb = boto3.resource("dynamodb")
+usage_table = dynamodb.Table(os.environ["USAGE_TABLE"])
+
 # Cambiado a Claude 3 Sonnet para mejor soporte multilingüe
 MODEL_ID = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
-
 
 def lambda_handler(event, context):
     key = None
@@ -37,6 +42,12 @@ def lambda_handler(event, context):
         text = response["Body"].read().decode("utf-8")
 
         # ---- Prompt recomendado ----
+        MAX_CHARS = 15000
+
+        if len(text) > MAX_CHARS:
+            logger.warning(f"Text too long ({len(text)}), truncating...")
+            text = text[:MAX_CHARS]
+            
         prompt = f"""
 You are a professional summarization assistant who respects the original language of the text.
 
@@ -72,15 +83,28 @@ TEXT END
             ]
         }
 
-        response = bedrock.invoke_model(
-            modelId=MODEL_ID,
-            contentType="application/json",
-            accept="application/json",
-            body=json.dumps(body)
-        )
+        if not text.strip():
+            raise Exception("Empty transcription")
 
-        response_body = json.loads(response["body"].read())
-        summary = response_body["content"][0]["text"]
+        if TEST_MODE:
+            logger.info("TEST MODE: Generando resumen mock")
+
+            summary = """
+        - Este es un resumen de prueba
+        - Generado sin usar Bedrock
+        - Sirve para testear la UI
+        """.strip()
+
+        else:
+            response = bedrock.invoke_model(
+                modelId=MODEL_ID,
+                contentType="application/json",
+                accept="application/json",
+                body=json.dumps(body)
+            )
+
+            response_body = json.loads(response["body"].read())
+            summary = response_body["content"][0]["text"]
 
         # ---- Output ----
         filename = os.path.basename(key)
@@ -92,6 +116,17 @@ TEXT END
             Body=summary.encode("utf-8")
         )
 
+        usage_table.update_item(
+            Key={"userId": user_id},
+            UpdateExpression="""
+                SET jobStatus = :status
+            """,
+            ExpressionAttributeValues={
+                ":status": "DONE"
+            }
+        )
+        
+        logger.info(f"Se utilizó el modelo: {MODEL_ID}")
         logger.info(f"Resumen generado: s3://{OUTPUT_BUCKET}/{summary_key}")
 
         return {
