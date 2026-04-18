@@ -40,10 +40,6 @@ def lambda_handler(event, context):
                     duration_seconds = float(item['end_time'])
                     break
 
-        for item in reversed(items):
-            if 'end_time' in item:
-                duration_seconds = float(item['end_time'])
-                break
         speaker_segments = transcript_data['results'].get('speaker_labels', {}).get('segments', [])
 
         speaker_map = {}
@@ -52,21 +48,24 @@ def lambda_handler(event, context):
             for item in segment['items']:
                 speaker_map[item['start_time']] = speaker
 
-        output_text = ""
+        output_parts = []
         current_speaker = None
 
         for item in items:
             if item['type'] == 'punctuation':
-                output_text += item['alternatives'][0]['content']
+                output_parts.append(item['alternatives'][0]['content'])
             else:
                 start_time = item.get('start_time')
                 speaker = speaker_map.get(start_time)
 
                 if speaker != current_speaker:
                     current_speaker = speaker
-                    output_text += f"\n\n{speaker}: "
+                    output_parts.append(f"\n\n{speaker}: ")
 
-                output_text += item['alternatives'][0]['content'] + " "
+                # 👇 SIEMPRE agregar texto
+                output_parts.append(item['alternatives'][0]['content'] + " ")
+
+        output_text = "".join(output_parts)
 
         # Guardar archivo .txt
         filename = os.path.basename(key).replace(".json", ".txt")
@@ -86,20 +85,22 @@ def lambda_handler(event, context):
 
         logger.info(f"Archivo TXT guardado en: s3://{bucket}/{txt_key}")
 
-                # Update the DynamoDB table with the actual duration
+        # Update the DynamoDB table with the actual duration
         # This will replace the estimated duration recorded during initial upload
         usage_table.update_item(
             Key={"userId": user_id},
             UpdateExpression="""
-                SET actualSeconds = if_not_exists(actualSeconds, :zero) + :delta,
-                    lastProcessedAt = :now,
-                    lastProcessedDuration = :duration
+            SET 
+                totalSeconds = if_not_exists(totalSeconds, :zero) + :duration,
+                pendingSeconds = if_not_exists(pendingSeconds, :zero) - :duration,
+                lastProcessedAt = :now,
+                jobStatus = :status
             """,
             ExpressionAttributeValues={
-                ":delta": duration_seconds,
                 ":zero": 0,
                 ":duration": duration_seconds,
-                ":now": datetime.utcnow().isoformat()
+                ":now": datetime.utcnow().isoformat(),
+                ":status": "FORMATTED"
             }
         )
 
