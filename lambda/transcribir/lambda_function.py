@@ -255,15 +255,25 @@ def lambda_handler(event, context):
         # ROUTE: checkStatus
         # -------------------------------------------------
         if "checkStatus" in body:
-
             job_name = body["checkStatus"]["job_name"]
-
-            # Consultar estado de transcripción desde Amazon Transcribe
-            tj = transcribe_client.get_transcription_job(
-                TranscriptionJobName=job_name
-            )
-
-            status = tj["TranscriptionJob"]["TranscriptionJobStatus"]
+            
+            # Si estamos en modo de prueba, simular la respuesta de Transcribe
+            if TEST_MODE:
+                logger.info(f"TEST MODE: Simulando verificación de estado para job: {job_name}")
+                
+                # Simular el estado de transcripción como COMPLETED
+                status = "COMPLETED"
+            else:
+                # Modo normal: consultar Amazon Transcribe
+                try:
+                    tj = transcribe_client.get_transcription_job(
+                        TranscriptionJobName=job_name
+                    )
+                    status = tj["TranscriptionJob"]["TranscriptionJobStatus"]
+                except Exception as e:
+                    logger.error(f"Error al verificar estado de transcripción: {str(e)}")
+                    # Si hay error al consultar Transcribe, devolver estado pendiente
+                    status = "PROCESSING"
 
             # Consultar estado del job desde DynamoDB en lugar de verificar S3
             resp = usage_table.get_item(Key={"userId": user_id})
