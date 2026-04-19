@@ -27,11 +27,16 @@ def lambda_handler(event, context):
         return
 
     try:
+        # Extraer el user_id del key (transcripciones/{user_id}/{job_name}.json)
+        user_id = key.split("/")[1]
+        job_name = os.path.basename(key).replace(".json", "")
+
         response = s3_client.get_object(Bucket=bucket, Key=key)
         transcript_data = json.loads(response['Body'].read().decode('utf-8'))
 
         items = transcript_data['results']['items']
-        # calcular duración del audio
+        
+        # Calcular duración REAL del audio a partir de la transcripción
         duration_seconds = 0
 
         if items:
@@ -40,6 +45,9 @@ def lambda_handler(event, context):
                     duration_seconds = float(item['end_time'])
                     break
 
+        logger.info(f"Real audio duration calculated: {duration_seconds} seconds")
+
+        # Procesar la transcripción para formatearla
         speaker_segments = transcript_data['results'].get('speaker_labels', {}).get('segments', [])
 
         speaker_map = {}
@@ -69,11 +77,7 @@ def lambda_handler(event, context):
 
         # Guardar archivo .txt
         filename = os.path.basename(key).replace(".json", ".txt")
-        job_name = filename.replace(".txt", "")
-
-        # NEW: extract user_id from path instead of job_name
-        # key example: transcripciones/{user_id}/{job_name}.json
-        user_id = key.split("/")[1]
+        txt_key = f"transcripciones-formateadas/{user_id}/{filename}"
 
         txt_key = f"transcripciones-formateadas/{user_id}/{filename}"
         s3_client.put_object(
@@ -85,8 +89,9 @@ def lambda_handler(event, context):
 
         logger.info(f"Archivo TXT guardado en: s3://{bucket}/{txt_key}")
 
-        # Update the DynamoDB table with the actual duration
-        # This will replace the estimated duration recorded during initial upload
+        # Actualizar DynamoDB con la duración real y marcar como formateado
+        # IMPORTANTE: No sumamos todavía a totalSeconds, solo actualizamos pendingSeconds
+        # con la duración real, para que el proceso final (resumir) haga la suma
         usage_table.update_item(
             Key={"userId": user_id},
             UpdateExpression="""

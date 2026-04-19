@@ -3,6 +3,7 @@ import boto3
 import os
 import logging
 from botocore.exceptions import ClientError
+from datetime import datetime
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -25,6 +26,46 @@ usage_table = dynamodb.Table(os.environ["USAGE_TABLE"])
 # Cambiado a Claude 3 Sonnet para mejor soporte multilingüe
 MODEL_ID = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
 
+def update_final_usage(user_id):
+    """
+    Actualiza el uso final al completar la transcripción.
+    Mueve la duración pendiente al total de segundos usados.
+    """
+    try:
+        # Obtener los segundos pendientes actuales (duración real calculada en formatear)
+        resp = usage_table.get_item(Key={"userId": user_id})
+        
+        if "Item" not in resp or "pendingSeconds" not in resp["Item"]:
+            logger.warning(f"No pending seconds found for user {user_id}")
+            return False
+            
+        pending_seconds = resp["Item"]["pendingSeconds"]
+        
+        if not pending_seconds:
+            logger.warning(f"Zero pending seconds for user {user_id}")
+            return False
+            
+        # Actualizar totalSeconds y limpiar pendingSeconds
+        usage_table.update_item(
+            Key={"userId": user_id},
+            UpdateExpression="""
+                ADD totalSeconds :duration
+                SET pendingSeconds = :zero,
+                    updatedAt = :now
+            """,
+            ExpressionAttributeValues={
+                ":duration": pending_seconds,
+                ":zero": 0,
+                ":now": datetime.utcnow().isoformat()
+            }
+        )
+        
+        logger.info(f"Updated final usage for user {user_id}: +{pending_seconds}s")
+        return True
+    except Exception as e:
+        logger.error(f"Error updating final usage: {str(e)}")
+        return False
+
 def lambda_handler(event, context):
     key = None
 
@@ -33,8 +74,9 @@ def lambda_handler(event, context):
         bucket = event["Records"][0]["s3"]["bucket"]["name"]
         key = event["Records"][0]["s3"]["object"]["key"]
 
-        # key example: transcripciones-formateadas/{user_id}/file.txt
+        # key example: transcripciones-formateadas/{user_id}/{file}.txt
         user_id = key.split("/")[1]
+        file_name = os.path.basename(key)
 
         logger.info(f"Procesando archivo: s3://{bucket}/{key}")
 
@@ -116,6 +158,9 @@ TEXT END
             Body=summary.encode("utf-8")
         )
 
+        update_final_usage(user_id)
+
+        # Actualizar estado del job a DONE
         usage_table.update_item(
             Key={"userId": user_id},
             UpdateExpression="""
@@ -128,6 +173,7 @@ TEXT END
         
         logger.info(f"Se utilizó el modelo: {MODEL_ID}")
         logger.info(f"Resumen generado: s3://{OUTPUT_BUCKET}/{summary_key}")
+        logger.info(f"USER {user_id} summary generated for {file_name}")
 
         return {
             "status": "COMPLETED",
@@ -168,18 +214,26 @@ def _write_failed_status(input_key, payload):
     Escribe un archivo FAILED para que el frontend
     pueda cortar el polling inmediatamente.
     """
-    if not input_key:
-        return
+    try:
+        parts = input_key.split("/")
+        if len(parts) >= 3:
+            user_id = parts[1]
+            filename = parts[-1]
+            error_key = f"resumenes/{user_id}/{filename}_FAILED.json"
 
-    filename = os.path.basename(input_key)
-    user_id = input_key.split("/")[1]
-    error_key = f"resumenes/{user_id}/{filename}_FAILED.json"
+            s3.put_object(
+                Bucket=OUTPUT_BUCKET,
+                Key=error_key,
+                Body=json.dumps(payload).encode("utf-8")
+            )
 
-    s3.put_object(
-        Bucket=OUTPUT_BUCKET,
-        Key=error_key,
-        Body=json.dumps(payload).encode("utf-8")
-    )
+            # En caso de fallo, también actualizamos DynamoDB
+            usage_table.update_item(
+                Key={"userId": user_id},
+                UpdateExpression="SET jobStatus = :status",
+                ExpressionAttributeValues={":status": "FAILED"}
+            )
 
-    logger.info(f"Estado FAILED escrito en s3://{OUTPUT_BUCKET}/{error_key}")
-    logger.info(f"USER {user_id} summary generated for {filename}")
+            logger.info(f"Estado FAILED escrito en s3://{OUTPUT_BUCKET}/{error_key}")
+    except Exception as e:
+        logger.error(f"Error escribiendo estado fallido: {str(e)}")

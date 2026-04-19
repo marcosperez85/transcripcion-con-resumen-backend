@@ -36,6 +36,7 @@ TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
 
 # Límite de segundos gratuitos
 segundos_gratis = 600
+max_minutes_audio = 10
 
 
 # -----------------------------------------------------
@@ -204,6 +205,7 @@ def update_usage_record(user_id, audio_duration_seconds):
 def lambda_handler(event, context):
 
     logger.info("Event received")
+    logger.info(json.dumps(event))
 
     try:
 
@@ -224,7 +226,7 @@ def lambda_handler(event, context):
             "amr", "flac", "m4a", "mp3", "mp4", "ogg", "webm", "wav"
         ]
 
-                # -------------------------------------------------
+        # -------------------------------------------------
         # ROUTE: checkUsage
         # -------------------------------------------------
         if "checkUsage" in body:
@@ -256,15 +258,18 @@ def lambda_handler(event, context):
 
             job_name = body["checkStatus"]["job_name"]
 
+            # Consultar estado de transcripción desde Amazon Transcribe
             tj = transcribe_client.get_transcription_job(
                 TranscriptionJobName=job_name
             )
 
             status = tj["TranscriptionJob"]["TranscriptionJobStatus"]
 
+            # Consultar estado del job desde DynamoDB en lugar de verificar S3
             resp = usage_table.get_item(Key={"userId": user_id})
             job_status = resp.get("Item", {}).get("jobStatus", "PROCESSING")
 
+            # Mantener las keys para compatibilidad con frontend existente
             formatted_key = f"transcripciones-formateadas/{user_id}/{job_name}.txt"
             summary_key = f"resumenes/{user_id}/{job_name}_summary.txt"
 
@@ -359,26 +364,34 @@ def lambda_handler(event, context):
                 400,
                 {
                     "error": "Audio too long for beta users",
-                    "maxMinutes": 30,
+                    "maxMinutes": max_minutes_audio,
                 },
             )
-                # -------------------------------------------------
+        # -------------------------------------------------
         # Estimate audio duration and update DynamoDB
         # -------------------------------------------------
         # Estimate audio duration based on file size and format
         original_format = key.split(".")[-1].lower()
         estimated_duration = estimate_audio_duration(size_bytes, original_format)
         logger.info(f"Estimated duration of audio: {estimated_duration} seconds")
+
+        # Crear el job_name ANTES de usarlo en la actualización de DynamoDB
+        job_name = f"{user_id}-{uuid.uuid4()}"
+        logger.info(f"Generated job name: {job_name}")
         
-        # Update usage tracking in DynamoDB
+        # Update usage tracking in DynamoDB - add pendingSeconds
         usage_table.update_item(
             Key={"userId": user_id},
             UpdateExpression="""
-                SET pendingSeconds = if_not_exists(pendingSeconds, :zero) + :duration
+                SET pendingSeconds = if_not_exists(pendingSeconds, :zero) + :duration,
+                    jobStatus = :status,
+                    lastJobId = :jobId
             """,
             ExpressionAttributeValues={
                 ":duration": estimated_duration,
-                ":zero": 0
+                ":zero": 0,
+                ":status": "PROCESSING",
+                ":jobId": job_name
             }
         )
             
@@ -386,8 +399,11 @@ def lambda_handler(event, context):
         # Revisar formato de audio y realizar conversión si fuera necesario
         # -------------------------------------------------
 
-        file_key = body["s3"]["key"]
-        original_format = file_key.split(".")[-1].lower()
+        # file_key = body["s3"]["key"]
+        # original_format = file_key.split(".")[-1].lower()
+
+        media_format = original_format
+        file_key = key
 
         # Convert if needed
         if needs_conversion(original_format):
@@ -410,24 +426,22 @@ def lambda_handler(event, context):
             settings["ShowSpeakerLabels"] = True
             settings["MaxSpeakerLabels"] = max_speakers
 
-        job_name = f"{user_id}-{uuid.uuid4()}"
-
         # Usar file_key en lugar de key para consistencia
         media_uri = f"s3://{output_bucket}/{file_key}"
 
         output_key = f"transcripciones/{user_id}/{job_name}.json"
 
-        usage_table.update_item(
-            Key={"userId": user_id},
-            UpdateExpression="""
-                SET lastJobId = :job,
-                    jobStatus = :status
-            """,
-            ExpressionAttributeValues={
-                ":job": job_name,
-                ":status": "PROCESSING"
-            }
-        )
+        # usage_table.update_item(
+        #     Key={"userId": user_id},
+        #     UpdateExpression="""
+        #         SET lastJobId = :job,
+        #             jobStatus = :status
+        #     """,
+        #     ExpressionAttributeValues={
+        #         ":job": job_name,
+        #         ":status": "PROCESSING"
+        #     }
+        # )
         
         # Verificar si estamos en modo de prueba (para evitar costos)
         # Solo se activa con la variable de entorno TEST_MODE=true
