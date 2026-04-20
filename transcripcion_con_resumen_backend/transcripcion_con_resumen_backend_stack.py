@@ -86,6 +86,7 @@ class TranscripcionConResumenBackendStack(Stack):
                         require_symbols=False,
                     ),
                     removal_policy=RemovalPolicy.DESTROY,
+                    account_recovery=cognito.AccountRecovery.EMAIL_ONLY,
                 )
 
         user_pool_client = cognito.UserPoolClient(
@@ -285,6 +286,7 @@ class TranscripcionConResumenBackendStack(Stack):
             environment=common_env,
             timeout=Duration.minutes(5),
             memory_size=512,
+            retry_attempts=2,  # Número de reintentos automáticos
         )
 
         self.usage_table.grant_read_write_data(self.fn_resumir)
@@ -390,9 +392,8 @@ class TranscripcionConResumenBackendStack(Stack):
                 # Además permite todas las regiones en 'Bedrock:*:'
                 # NO USAR EN PRODUCCIÓN
                 resources=[
-                    # f"arn:aws:bedrock:*:{self.account}:inference-profile/*",
-                    # f"arn:aws:bedrock:*::foundation-model/*"
-                     f"arn:aws:bedrock:{self.region}::foundation-model/us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+                    f"arn:aws:bedrock:*:{self.account}:inference-profile/*",
+                    f"arn:aws:bedrock:*::foundation-model/*"
                 ]
             )
         )
