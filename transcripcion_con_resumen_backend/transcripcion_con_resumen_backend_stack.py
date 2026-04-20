@@ -51,9 +51,6 @@ class TranscripcionConResumenBackendStack(Stack):
                     allowed_origins=frontend_origins,
                     allowed_headers=["*", "authorization", "content-type", "x-amz-*"],
                     exposed_headers=["etag", "x-amz-request-id", "x-amz-id-2"],
-                    # Limito el origen permitido del CORS para que sólo mi CloudFront distribution pueda hacer API calls
-                    # allowed_origins=["https://d11ahn26gyfe9q.cloudfront.net"],
-                    # allowed_headers=["*"],
                     max_age=3000,
                 )
             ],
@@ -393,8 +390,9 @@ class TranscripcionConResumenBackendStack(Stack):
                 # Además permite todas las regiones en 'Bedrock:*:'
                 # NO USAR EN PRODUCCIÓN
                 resources=[
-                    f"arn:aws:bedrock:*:{self.account}:inference-profile/*",
-                    f"arn:aws:bedrock:*::foundation-model/*"
+                    # f"arn:aws:bedrock:*:{self.account}:inference-profile/*",
+                    # f"arn:aws:bedrock:*::foundation-model/*"
+                     f"arn:aws:bedrock:{self.region}::foundation-model/us.anthropic.claude-3-7-sonnet-20250219-v1:0"
                 ]
             )
         )
@@ -454,9 +452,10 @@ class TranscripcionConResumenBackendStack(Stack):
             "Default4xx",
             type=apigateway.ResponseType.DEFAULT_4_XX,
             response_headers={
-                "Access-Control-Allow-Origin": "'*'",
-                "Access-Control-Allow-Headers": "'*'",
-                "Access-Control-Allow-Methods": "'*'"
+                # Usar variable específica en lugar de wildcard
+                "Access-Control-Allow-Origin": f"'{frontend_origins[0]}'",
+                "Access-Control-Allow-Headers": "'Content-Type,Authorization'",
+                "Access-Control-Allow-Methods": "'OPTIONS,POST,GET'"
             },
         )
 
