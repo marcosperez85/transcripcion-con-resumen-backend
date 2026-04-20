@@ -139,7 +139,6 @@ class TranscripcionConResumenBackendStack(Stack):
         user_pool_client_id = user_pool_client.user_pool_client_id
 
         provider_base = f"cognito-idp.{Aws.REGION}.amazonaws.com/{user_pool_id}"
-        # role_mapping_provider = f"{provider_base}:{user_pool_client_id}"
 
         # === Identity Pool sin anónimos, enlazado al User Pool existente ===
         id_pool = cognito.CfnIdentityPool(
@@ -292,9 +291,8 @@ class TranscripcionConResumenBackendStack(Stack):
         self.usage_table.grant_read_write_data(self.fn_resumir)
 
         # 3 Permisos de bucket más específicos
-        # El lambra de transcribir tiene permiso de lectura al bucket de audios
-        # EDITAR: parece tener permisos de lectura sobre las transcripciones y resúmenes.
-        # Revisar si eso es necesario sino eliminar.
+        # El lambra de transcribir tiene permiso de lectura al bucket de audios, transcripciones y resúmenes.
+        # 19/4/26 Intenté limitar este acceso pero rompió el flujo y dejó de visualizarse el resultado
         self.fn_transcribir.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["s3:GetObject"],
