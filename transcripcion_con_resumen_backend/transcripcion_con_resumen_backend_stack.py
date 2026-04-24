@@ -295,12 +295,29 @@ class TranscripcionConResumenBackendStack(Stack):
         # 19/4/26 Intenté limitar este acceso pero rompió el flujo y dejó de visualizarse el resultado
         self.fn_transcribir.add_to_role_policy(
             iam.PolicyStatement(
-                actions=["s3:GetObject"],
+                actions=["s3:GetObject", "s3:DeleteObject"],
                 resources=[
                     f"{self.bucket.bucket_arn}/{self.PFX_AUDIOS}*",
                     f"{self.bucket.bucket_arn}/{self.PFX_TRANSCRIPCIONES_FMT}*",    # Para leer transcripciones formateadas
                     f"{self.bucket.bucket_arn}/{self.PFX_RESUMENES}*",              # Para leer resúmenes
                 ],
+            )
+        )
+
+        # Permiso al lambda de transcribir para listar objetos (necesario para el dashboard)
+        self.fn_transcribir.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["s3:ListBucket"],
+                resources=[self.bucket.bucket_arn],
+                conditions={
+                    "StringLike": {
+                        "s3:prefix": [
+                            f"{self.PFX_AUDIOS}*",
+                            f"{self.PFX_TRANSCRIPCIONES_FMT}*",
+                            f"{self.PFX_RESUMENES}*"
+                        ]
+                    }
+                }
             )
         )
 
