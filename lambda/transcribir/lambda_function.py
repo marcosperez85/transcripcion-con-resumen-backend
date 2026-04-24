@@ -296,6 +296,134 @@ def lambda_handler(event, context):
             )
 
         # -------------------------------------------------
+        # ROUTE: getDashboardData
+        # -------------------------------------------------
+        if "getDashboardData" in body:
+            identity_id = body.get("identityId")
+            
+            dashboard_data = {
+                "usage": {
+                    "usedSeconds": 0,
+                    "limitSeconds": segundos_gratis,
+                    "remainingSeconds": segundos_gratis
+                },
+                "audios": [],
+                "formatted": [],
+                "summaries": []
+            }
+
+            # 1. Obtener uso
+            resp = usage_table.get_item(Key={"userId": user_id})
+            if "Item" in resp:
+                item = resp["Item"]
+                used = item.get("totalSeconds", 0)
+                limit = item.get("limitSeconds", segundos_gratis)
+                dashboard_data["usage"]["usedSeconds"] = used
+                dashboard_data["usage"]["limitSeconds"] = limit
+                dashboard_data["usage"]["remainingSeconds"] = max(0, limit - used)
+                
+            # 2. Listar audios (usa identityId)
+            if identity_id:
+                try:
+                    audios_resp = s3_client.list_objects_v2(
+                        Bucket=output_bucket, 
+                        Prefix=f"audios/{identity_id}/"
+                    )
+                    for obj in audios_resp.get("Contents", []):
+                        dashboard_data["audios"].append({
+                            "key": obj["Key"],
+                            "filename": obj["Key"].split("/")[-1],
+                            "date": obj["LastModified"].isoformat(),
+                            "size": obj["Size"]
+                        })
+                except Exception as e:
+                    logger.error(f"Error listando audios: {str(e)}")
+
+            # 3. Listar transcripciones formateadas (usa user_id)
+            try:
+                fmt_resp = s3_client.list_objects_v2(
+                    Bucket=output_bucket, 
+                    Prefix=f"transcripciones-formateadas/{user_id}/"
+                )
+                for obj in fmt_resp.get("Contents", []):
+                    dashboard_data["formatted"].append({
+                        "key": obj["Key"],
+                        "filename": obj["Key"].split("/")[-1],
+                        "jobName": obj["Key"].split("/")[-1].replace(".txt", ""),
+                        "date": obj["LastModified"].isoformat()
+                    })
+            except Exception as e:
+                logger.error(f"Error listando transcripciones: {str(e)}")
+
+            # 4. Listar resúmenes (usa user_id)
+            try:
+                sum_resp = s3_client.list_objects_v2(
+                    Bucket=output_bucket, 
+                    Prefix=f"resumenes/{user_id}/"
+                )
+                for obj in sum_resp.get("Contents", []):
+                    filename = obj["Key"].split("/")[-1]
+                    if filename.endswith("_summary.txt"):
+                        dashboard_data["summaries"].append({
+                            "key": obj["Key"],
+                            "filename": filename,
+                            "jobName": filename.replace("_summary.txt", ""),
+                            "date": obj["LastModified"].isoformat()
+                        })
+            except Exception as e:
+                logger.error(f"Error listando resumenes: {str(e)}")
+
+            return response(200, dashboard_data)
+
+        # -------------------------------------------------
+        # ROUTE: deleteFile
+        # -------------------------------------------------
+        if "deleteFile" in body:
+            file_key = body["deleteFile"]["key"]
+            identity_id = body["deleteFile"].get("identityId")
+
+            # Validate that the file belongs to the user
+            # Can be audios/{identityId}/... or transcripciones*/{user_id}/... or resumenes/{user_id}/...
+            is_valid = False
+            
+            if file_key.startswith(f"audios/{identity_id}/") and identity_id:
+                is_valid = True
+            elif file_key.startswith(f"transcripciones-formateadas/{user_id}/"):
+                is_valid = True
+            elif file_key.startswith(f"resumenes/{user_id}/"):
+                is_valid = True
+            elif file_key.startswith(f"transcripciones/{user_id}/"):
+                is_valid = True
+
+            if not is_valid:
+                return response(403, {"error": "No tienes permiso para eliminar este archivo o la ruta es inválida"})
+
+            try:
+                # If it's a job (transcripciones-formateadas), we should ideally delete all related files
+                # (original json, formatted txt, and summary). But to keep it simple, we delete the specified key.
+                # The user requested deleting "each transcription", which might mean deleting the whole job.
+                # But if they pass the specific key, we delete that. If we want to delete all job files:
+                if file_key.startswith("transcripciones-formateadas/"):
+                    job_name = file_key.split("/")[-1].replace(".txt", "")
+                    
+                    # Delete formatted
+                    s3_client.delete_object(Bucket=output_bucket, Key=file_key)
+                    # Delete raw json
+                    s3_client.delete_object(Bucket=output_bucket, Key=f"transcripciones/{user_id}/{job_name}.json")
+                    # Delete summary
+                    s3_client.delete_object(Bucket=output_bucket, Key=f"resumenes/{user_id}/{job_name}_summary.txt")
+                    
+                    logger.info(f"Deleted job files for: {job_name}")
+                else:
+                    s3_client.delete_object(Bucket=output_bucket, Key=file_key)
+                    logger.info(f"Deleted file: {file_key}")
+                    
+                return response(200, {"message": "Archivo eliminado correctamente"})
+            except ClientError as e:
+                logger.error(f"Error deleting file {file_key}: {str(e)}")
+                return response(500, {"error": "Error al eliminar el archivo"})
+
+        # -------------------------------------------------
         # ROUTE: getResults
         # -------------------------------------------------
         if "getResults" in body:
