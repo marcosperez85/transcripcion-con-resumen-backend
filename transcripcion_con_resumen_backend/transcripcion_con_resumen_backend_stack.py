@@ -300,6 +300,7 @@ class TranscripcionConResumenBackendStack(Stack):
                     f"{self.bucket.bucket_arn}/{self.PFX_AUDIOS}*",
                     f"{self.bucket.bucket_arn}/{self.PFX_TRANSCRIPCIONES_FMT}*",    # Para leer transcripciones formateadas
                     f"{self.bucket.bucket_arn}/{self.PFX_RESUMENES}*",              # Para leer resúmenes
+                    f"{self.bucket.bucket_arn}/{self.PFX_TRANSCRIPCIONES}*",        # Para eliminar JSON crudo
                 ],
             )
         )
