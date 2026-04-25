@@ -424,6 +424,43 @@ def lambda_handler(event, context):
                 return response(500, {"error": "Error al eliminar el archivo"})
 
         # -------------------------------------------------
+        # ROUTE: getDownloadUrl
+        # -------------------------------------------------
+        if "getDownloadUrl" in body:
+            file_key = body["getDownloadUrl"]["key"]
+            identity_id = body["getDownloadUrl"].get("identityId")
+
+            # Validate that the file belongs to the user
+            is_valid = False
+            
+            if file_key.startswith(f"audios/{identity_id}/") and identity_id:
+                is_valid = True
+            elif file_key.startswith(f"transcripciones-formateadas/{user_id}/"):
+                is_valid = True
+            elif file_key.startswith(f"resumenes/{user_id}/"):
+                is_valid = True
+            elif file_key.startswith(f"transcripciones/{user_id}/"):
+                is_valid = True
+
+            if not is_valid:
+                return response(403, {"error": "No tienes permiso para descargar este archivo o la ruta es inválida"})
+
+            try:
+                url = s3_client.generate_presigned_url(
+                    'get_object',
+                    Params={
+                        'Bucket': output_bucket,
+                        'Key': file_key,
+                        'ResponseContentDisposition': f'attachment; filename="{file_key.split("/")[-1]}"'
+                    },
+                    ExpiresIn=3600
+                )
+                return response(200, {"url": url})
+            except ClientError as e:
+                logger.error(f"Error generating presigned url for {file_key}: {str(e)}")
+                return response(500, {"error": "Error al generar enlace de descarga"})
+
+        # -------------------------------------------------
         # ROUTE: getResults
         # -------------------------------------------------
         if "getResults" in body:
