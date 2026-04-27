@@ -47,7 +47,7 @@ def response(code, payload):
     return {
         "statusCode": code,
         "headers": {
-            "Access-Control-Allow-Origin": "https://d11ahn26gyfe9q.cloudfront.net",
+            "Access-Control-Allow-Origin": "https://www.sonitext.com", 
             "Access-Control-Allow-Headers": "Content-Type,Authorization",
             "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
         },
