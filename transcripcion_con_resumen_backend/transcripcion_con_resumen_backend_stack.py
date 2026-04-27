@@ -30,6 +30,8 @@ class TranscripcionConResumenBackendStack(Stack):
 
         frontend_origins = self.node.try_get_context("frontendOrigins") or [
             "https://d11ahn26gyfe9q.cloudfront.net",
+            "https://sonitext.com",
+            "https://www.sonitext.com",
             "http://localhost:5173",           # Vite por defecto
             "http://localhost:3000"            # opcional si usás ese puerto
         ]
@@ -111,10 +113,14 @@ class TranscripcionConResumenBackendStack(Stack):
                 ],
                 callback_urls=[
                     "https://d11ahn26gyfe9q.cloudfront.net/pages/callback.html",
+                    "https://sonitext.com/pages/callback.html",
+                    "https://www.sonitext.com/pages/callback.html",
                     "http://localhost:5173/pages/callback.html"                   
                 ],
                 logout_urls=[
                     "https://d11ahn26gyfe9q.cloudfront.net/",
+                    "https://sonitext.com/",
+                    "https://www.sonitext.com/",
                     "http://localhost:5173/"
                 ],
             ),
