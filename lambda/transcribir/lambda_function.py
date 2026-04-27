@@ -43,11 +43,21 @@ max_minutes_audio = 10
 # Helpers
 # -----------------------------------------------------
 
+ALLOWED_ORIGINS = [
+    "https://www.sonitext.com",
+    "https://sonitext.com",
+    "http://localhost:5173",
+    "http://localhost:3000"
+]
+
+# Variable global para manejar el origin dinámicamente en cada ejecución
+REQUEST_ORIGIN = "https://www.sonitext.com"
+
 def response(code, payload):
     return {
         "statusCode": code,
         "headers": {
-            "Access-Control-Allow-Origin": "https://www.sonitext.com", 
+            "Access-Control-Allow-Origin": REQUEST_ORIGIN, 
             "Access-Control-Allow-Headers": "Content-Type,Authorization",
             "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
         },
@@ -203,6 +213,16 @@ def update_usage_record(user_id, audio_duration_seconds):
 # -----------------------------------------------------
 
 def lambda_handler(event, context):
+    global REQUEST_ORIGIN
+    
+    # Extraer origin de los headers para manejar CORS dinámicamente
+    headers = event.get("headers", {})
+    origin = headers.get("origin") or headers.get("Origin")
+    
+    if origin in ALLOWED_ORIGINS:
+        REQUEST_ORIGIN = origin
+    else:
+        REQUEST_ORIGIN = "https://www.sonitext.com"
 
     logger.info("Event received")
     logger.info(json.dumps(event))
