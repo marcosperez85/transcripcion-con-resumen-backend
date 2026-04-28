@@ -9,6 +9,10 @@ from aws_cdk import (
     aws_apigateway as apigateway,
     aws_s3_notifications as s3n,
     aws_dynamodb as dynamodb,
+    aws_secretsmanager as secretsmanager,
+    aws_certificatemanager as acm,
+    aws_route53 as route53,
+    aws_route53_targets as targets,
     RemovalPolicy,
     CfnOutput,
 )
@@ -248,6 +252,37 @@ class TranscripcionConResumenBackendStack(Stack):
             description="FFmpeg for audio conversion"
         )
 
+        # 🟢 Secret para Lemon Squeezy
+        lemon_secret = secretsmanager.Secret(
+            self, "LemonSqueezyWebhookSecret",
+            secret_name="LemonSqueezyWebhookSecret",
+            description="Secret token for Lemon Squeezy Webhooks",
+            # Genera un string aleatorio que deberás reemplazar en la consola por el Real
+            generate_secret_string=secretsmanager.SecretStringGenerator(
+                password_length=32,
+                exclude_characters="\"@/\\"
+            )
+        )
+
+        # 🟢 Lambda para el Webhook
+        self.fn_webhook = lambda_.Function(
+            self,
+            "proyecto1-webhook-lemonsqueezy",
+            function_name="proyecto1-webhook-lemonsqueezy",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="lambda_function.lambda_handler",
+            code=lambda_.Code.from_asset("lambda/webhook"),
+            environment={
+                "USAGE_TABLE": self.usage_table.table_name,
+                "SECRET_ARN": lemon_secret.secret_arn
+            },
+            timeout=Duration.seconds(30),
+            memory_size=256,
+        )
+
+        self.usage_table.grant_read_write_data(self.fn_webhook)
+        lemon_secret.grant_read(self.fn_webhook)
+
         self.fn_transcribir = lambda_.Function(
             self,
             "proyecto1-transcribir-audios",
@@ -434,7 +469,22 @@ class TranscripcionConResumenBackendStack(Stack):
             ),
         )
 
-        # 6 API Gateway (solo para kick-off de transcripción)
+        # 🟢 Custom Domain para el API (api.sonitext.com)
+        domain_name = "sonitext.com"
+        api_domain = f"api.{domain_name}"
+
+        hosted_zone = route53.HostedZone.from_lookup(
+            self, "HostedZone", domain_name=domain_name
+        )
+
+        api_certificate = acm.DnsValidatedCertificate(
+            self, "ApiCertificate",
+            domain_name=api_domain,
+            hosted_zone=hosted_zone,
+            region=self.region,
+        )
+
+        # 6 API Gateway (solo para kick-off de transcripción y webhooks)
         api = apigateway.RestApi(
             self,
             
@@ -448,6 +498,21 @@ class TranscripcionConResumenBackendStack(Stack):
                 allow_methods=["POST", "OPTIONS"],
                 allow_headers=["Content-Type", "Authorization"],
                 max_age=Duration.hours(1)
+            ),
+            # 🟢 Enlazar al dominio personalizado
+            domain_name=apigateway.DomainNameOptions(
+                domain_name=api_domain,
+                certificate=api_certificate
+            )
+        )
+
+        # 🟢 ARecord para apuntar api.sonitext.com al API Gateway
+        route53.ARecord(
+            self, "ApiAliasRecord",
+            zone=hosted_zone,
+            record_name="api",
+            target=route53.RecordTarget.from_alias(
+                targets.ApiGateway(api)
             )
         )
         transcribir_res = api.root.add_resource("transcribir")
@@ -466,6 +531,13 @@ class TranscripcionConResumenBackendStack(Stack):
             apigateway.LambdaIntegration(self.fn_transcribir, proxy=True),
             authorizer=authorizer,
             authorization_type=apigateway.AuthorizationType.COGNITO
+        )
+
+        # 🟢 Endpoint del Webhook de Lemon Squeezy (SIN autorizador)
+        webhook_res = api.root.add_resource("webhook")
+        webhook_res.add_method(
+            "POST",
+            apigateway.LambdaIntegration(self.fn_webhook, proxy=True)
         )
 
         api.add_gateway_response(
