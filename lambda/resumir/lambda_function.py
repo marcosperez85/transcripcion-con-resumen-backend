@@ -24,7 +24,7 @@ dynamodb = boto3.resource("dynamodb")
 usage_table = dynamodb.Table(os.environ["USAGE_TABLE"])
 
 # Cambiado a Claude 3 Sonnet para mejor soporte multilingüe
-MODEL_ID = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 def update_final_usage(user_id):
     """
